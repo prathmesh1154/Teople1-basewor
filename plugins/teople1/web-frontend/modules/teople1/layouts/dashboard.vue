@@ -5,14 +5,15 @@
       <Sidebar />
       <main class="main-content">
         <Nuxt />
+
       </main>
     </div>
   </div>
 </template>
 
 <script>
-import Navbar from '../components/Navbar.vue'
-import Sidebar from '../components/Sidebar.vue'
+import Navbar from '@teople1/components/Navbar.vue'
+import Sidebar from '@teople1/components/Sidebar.vue'
 
 export default {
   components: { Navbar, Sidebar },
@@ -39,6 +40,6 @@ export default {
   padding: 20px;
   background: #f8fafc;
   margin-left: 220px; /* Sidebar width */
-  min-height: calc(100vh - 60px);
+  min-height: calc(100vh);
 }
 </style>
