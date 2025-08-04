@@ -15,6 +15,7 @@
 import Navbar from '@teople1/components/Navbar.vue'
 import Sidebar from '@teople1/components/Sidebar.vue'
 
+
 export default {
   components: { Navbar, Sidebar },
     name: 'Dashboard'

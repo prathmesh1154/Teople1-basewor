@@ -2,9 +2,11 @@
   <aside class="app-sidebar">
     <nav class="sidebar-nav">
       <NuxtLink to="/demo/index" exact class="nav-link">Dashboard</NuxtLink>
-      <NuxtLink to="/users" class="nav-link">Users</NuxtLink>
-      <NuxtLink to="/settings" class="nav-link">Settings</NuxtLink>
-      <a href="#" class="nav-link">Logout</a>
+      <NuxtLink to="/demo/users" class="nav-link">Users</NuxtLink>
+      <NuxtLink to="/course/courses" class="nav-link">Courses</NuxtLink>
+      <NuxtLink to="/demo/tasks" class="nav-link">Tasks</NuxtLink>
+      <NuxtLink to="/auth/login" class="nav-link" @click.prevent="logout">Logout</NuxtLink>
+
     </nav>
     <div class="sidebar-footer">
       Logged in as <strong>Admin</strong>
@@ -20,7 +22,7 @@
   width: 220px;
   background: #2d3748;
   color: white;
-  height: calc(100vh - 60px);
+  height: calc(100vh - 0px);
   display: flex;
   flex-direction: column;
 }
