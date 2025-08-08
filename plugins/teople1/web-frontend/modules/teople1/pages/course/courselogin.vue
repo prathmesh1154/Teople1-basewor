@@ -1,30 +1,20 @@
 <template>
-  <div class="auth-container">
-    <div class="auth-box">
-      <!-- Toggle between Login and Register -->
-      <div class="auth-toggle">
-        <button
-          @click="showRegister = false"
-          :class="{ active: !showRegister }"
-        >
-          Login
-        </button>
-        <button
-          @click="showRegister = true"
-          :class="{ active: showRegister }"
-        >
-          Register
-        </button>
-      </div>
+  <div v-if="showModal" class="login-modal">
+    <div class="modal-overlay" @click="closeModal"></div>
+    <div class="modal-content">
+      <button class="close-button" @click="closeModal">
+        <i class="fas fa-times"></i>
+      </button>
 
       <!-- Login Form -->
-      <div v-if="!showRegister" class="auth-form">
+      <div v-if="!showRegister">
         <h2>Login to Continue</h2>
-
         <form @submit.prevent="handleLogin">
           <div class="form-group">
+            <label for="login-username">Username</label>
             <input
               type="text"
+              id="login-username"
               v-model="loginData.username"
               placeholder="Enter your username"
               required
@@ -33,8 +23,10 @@
             <p v-if="formErrors.username" class="error-text">{{ formErrors.username }}</p>
           </div>
           <div class="form-group">
+            <label for="login-password">Password</label>
             <input
               type="password"
+              id="login-password"
               v-model="loginData.password"
               placeholder="Enter your password"
               required
@@ -42,20 +34,24 @@
             />
             <p v-if="formErrors.password" class="error-text">{{ formErrors.password }}</p>
           </div>
-          <button type="submit" class="auth-button" :disabled="loading">
+          <button type="submit" class="login-button" :disabled="loading">
             {{ loading ? 'Logging in...' : 'Login' }}
           </button>
         </form>
+        <div class="login-footer">
+          <p>Don't have an account? <a href="#" @click.prevent="toggleRegister">Sign up</a></p>
+        </div>
       </div>
 
       <!-- Registration Form -->
-      <div v-else class="auth-form">
+      <div v-else>
         <h2>Create an Account</h2>
-
         <form @submit.prevent="handleRegister">
           <div class="form-group">
+            <label for="reg-username">Username</label>
             <input
               type="text"
+              id="reg-username"
               v-model="registerData.username"
               placeholder="Choose a username"
               required
@@ -64,8 +60,10 @@
             <p v-if="formErrors.username" class="error-text">{{ formErrors.username }}</p>
           </div>
           <div class="form-group">
+            <label for="reg-email">Email</label>
             <input
               type="email"
+              id="reg-email"
               v-model="registerData.email"
               placeholder="Enter your email"
               required
@@ -74,8 +72,10 @@
             <p v-if="formErrors.email" class="error-text">{{ formErrors.email }}</p>
           </div>
           <div class="form-group">
+            <label for="reg-password">Password</label>
             <input
               type="password"
+              id="reg-password"
               v-model="registerData.password"
               placeholder="Create a password"
               required
@@ -84,23 +84,30 @@
             <p v-if="formErrors.password" class="error-text">{{ formErrors.password }}</p>
           </div>
           <div class="form-group">
+            <label for="reg-firstname">First Name (Optional)</label>
             <input
               type="text"
+              id="reg-firstname"
               v-model="registerData.first_name"
-              placeholder="First name (optional)"
+              placeholder="Enter your first name"
             />
           </div>
           <div class="form-group">
+            <label for="reg-lastname">Last Name (Optional)</label>
             <input
               type="text"
+              id="reg-lastname"
               v-model="registerData.last_name"
-              placeholder="Last name (optional)"
+              placeholder="Enter your last name"
             />
           </div>
-          <button type="submit" class="auth-button" :disabled="loading">
+          <button type="submit" class="login-button" :disabled="loading">
             {{ loading ? 'Registering...' : 'Register' }}
           </button>
         </form>
+        <div class="login-footer">
+          <p>Already have an account? <a href="#" @click.prevent="toggleRegister">Login</a></p>
+        </div>
       </div>
 
       <!-- Success Message -->
@@ -127,8 +134,10 @@
 
 <script>
 export default {
+  layout: 'dashboard',
   data() {
     return {
+      showModal: false,
       showRegister: false,
       loading: false,
       successMessage: '',
@@ -148,6 +157,36 @@ export default {
     }
   },
   methods: {
+    openModal() {
+      this.showModal = true
+    },
+    closeModal() {
+      this.showModal = false
+      this.resetForms()
+    },
+    toggleRegister() {
+      this.showRegister = !this.showRegister
+      this.errorMessage = ''
+      this.successMessage = ''
+      this.formErrors = {}
+    },
+    resetForms() {
+      this.loginData = {
+        username: '',
+        password: ''
+      }
+      this.registerData = {
+        username: '',
+        email: '',
+        password: '',
+        first_name: '',
+        last_name: ''
+      }
+      this.errorMessage = ''
+      this.successMessage = ''
+      this.formErrors = {}
+      this.showRegister = false
+    },
     validateLoginForm() {
       this.formErrors = {}
       let valid = true
@@ -205,24 +244,24 @@ export default {
         })
 
         if (response.data && response.data.status === 'success') {
-          // Store login status and user data
-          localStorage.setItem('isLoggedIn', true)
-          if (response.data.user) {
-            localStorage.setItem('user', JSON.stringify(response.data.user))
-          }
-
-          this.successMessage = 'Login successful! Redirecting...'
-
-          // Redirect to demo/index after short delay
-          setTimeout(() => {
-            this.$router.push('/demo/index')
-          }, 1500)
+          // Handle successful login
+          this.isLoggedIn = true
+          this.closeModal()
+          this.$emit('login-success', response.data.user)
         } else {
           this.errorMessage = response.data?.message || 'Login failed'
         }
       } catch (error) {
         console.error('Login error:', error)
-        this.handleApiError(error)
+
+        if (error.response) {
+          if (error.response.data?.errors) {
+            this.formErrors = { ...this.formErrors, ...error.response.data.errors }
+          }
+          this.errorMessage = error.response.data?.message || 'Login failed'
+        } else {
+          this.errorMessage = 'Network error. Please try again.'
+        }
       } finally {
         this.loading = false
       }
@@ -244,116 +283,116 @@ export default {
         })
 
         if (response.data && response.data.status === 'success') {
+          // Show success message and switch to login form
           this.successMessage = 'Registration successful! Please login.'
-          this.registerData = {
-            username: '',
-            email: '',
-            password: '',
-            first_name: '',
-            last_name: ''
-          }
+          this.resetRegisterForm()
           this.showRegister = false
+
+          // Auto-fill login form with registered credentials
           this.loginData.username = this.registerData.username
         } else {
           this.errorMessage = response.data?.message || 'Registration failed'
         }
       } catch (error) {
         console.error('Registration error:', error)
-        this.handleApiError(error)
+
+        if (error.response) {
+          if (error.response.data?.errors) {
+            this.formErrors = { ...this.formErrors, ...error.response.data.errors }
+          }
+          this.errorMessage = error.response.data?.message || 'Registration failed'
+        } else {
+          this.errorMessage = 'Network error. Please try again.'
+        }
       } finally {
         this.loading = false
       }
     },
-    handleApiError(error) {
-      if (error.response) {
-        if (error.response.data?.errors) {
-          this.formErrors = { ...this.formErrors, ...error.response.data.errors }
-        }
-        this.errorMessage = error.response.data?.message || 'Request failed'
-      } else {
-        this.errorMessage = 'Network error. Please try again.'
+    resetRegisterForm() {
+      this.registerData = {
+        username: '',
+        email: '',
+        password: '',
+        first_name: '',
+        last_name: ''
       }
+      this.formErrors = {}
     }
   }
 }
 </script>
 
 <style scoped>
-.auth-container {
+/* Reusing styles from your task management component */
+.login-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
-  background-color: #f8fafc;
-  padding: 20px;
+  z-index: 1000;
 }
 
-.auth-box {
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  position: relative;
   background: white;
   padding: 30px;
   border-radius: 10px;
   width: 100%;
   max-width: 400px;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+  z-index: 1001;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
 }
 
-.auth-toggle {
-  display: flex;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.auth-toggle button {
-  flex: 1;
-  padding: 12px;
+.close-button {
+  position: absolute;
+  top: 15px;
+  right: 15px;
   background: none;
   border: none;
-  font-size: 16px;
-  font-weight: 600;
-  color: #64748b;
+  font-size: 20px;
   cursor: pointer;
-  position: relative;
-}
-
-.auth-toggle button.active {
-  color: #2563eb;
-}
-
-.auth-toggle button.active:after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: #2563eb;
+  color: #7f8c8d;
 }
 
 h2 {
   margin-top: 0;
   margin-bottom: 20px;
-  color: #1e293b;
+  color: #2c3e50;
   font-size: 1.5rem;
   font-weight: 600;
-  text-align: center;
 }
 
 .form-group {
   margin-bottom: 20px;
 }
 
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #2c3e50;
+  font-size: 0.875rem;
+}
+
 input {
   width: 100%;
   padding: 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
   font-size: 16px;
-  transition: border-color 0.2s;
-}
-
-input:focus {
-  outline: none;
-  border-color: #2563eb;
 }
 
 .input-error {
@@ -366,38 +405,51 @@ input:focus {
   color: #ef4444;
 }
 
-.auth-button {
+.login-button {
   width: 100%;
   padding: 12px;
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  background: linear-gradient(135deg, #3498db, #2980b9);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s;
 }
 
-.auth-button:hover:not(:disabled) {
+.login-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(37, 99, 235, 0.3);
+  box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
 }
 
-.auth-button:disabled {
+.login-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.login-footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.login-footer a {
+  color: #3498db;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
 }
 
 .success-message {
   margin-top: 20px;
   padding: 12px;
-  background-color: #ecfdf5;
-  color: #065f46;
-  border-radius: 6px;
+  background-color: #ECFDF5;
+  color: #065F46;
+  border-radius: 5px;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 0.5rem;
   font-size: 0.875rem;
 }
@@ -405,12 +457,11 @@ input:focus {
 .error-message {
   margin-top: 20px;
   padding: 12px;
-  background-color: #fef2f2;
-  color: #b91c1c;
-  border-radius: 6px;
+  background-color: #FEF2F2;
+  color: #B91C1C;
+  border-radius: 5px;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 0.5rem;
   font-size: 0.875rem;
 }

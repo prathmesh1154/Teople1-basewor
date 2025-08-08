@@ -18,9 +18,8 @@
         v-for="(course, index) in courses"
         :key="course.id"
         class="course-card"
-        @click="openCourseDetails(course.id)"
       >
-        <div class="course-image-container">
+        <div class="course-image-container" @click="openCourseDetails(course.id)">
           <img :src="course.image" :alt="course.title" class="course-image" />
           <span class="course-status" :class="course.status.toLowerCase().replace(/\s+/g, '-')">
             {{ course.status }}
@@ -38,7 +37,7 @@
             </span>
           </div>
 
-          <h2 class="course-title">{{ course.title }}</h2>
+          <h2 class="course-title" @click="openCourseDetails(course.id)">{{ course.title }}</h2>
 
           <div class="course-progress">
             <div class="progress-info">
@@ -52,19 +51,32 @@
             </div>
           </div>
 
-          <button class="course-action-btn">
-            {{ course.progress === 0 ? 'Start Now' : course.progress === 100 ? 'View Certificate' : 'Continue' }}
+          <button
+            class="course-action-btn"
+            @click.stop="handleCourseAction(course)"
+          >
+            {{ getButtonText(course) }}
           </button>
         </div>
       </div>
     </div>
+
+    <login-modal
+      ref="loginModal"
+      @login-success="startCourse(selectedCourseId)"
+    />
   </div>
 </template>
 
 <script>
+import LoginModal from './courselogin.vue'
+
 export default {
   layout: 'dashboard',
   name: "CoursesPage",
+  components: {
+    LoginModal
+  },
   data() {
     return {
       courses: [
@@ -75,8 +87,7 @@ export default {
           instructor: "Arianna",
           progress: 100,
           status: "Complete",
-          image:
-            "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60",
+          image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60",
         },
         {
           id: 2,
@@ -85,8 +96,7 @@ export default {
           instructor: "Adele",
           progress: 0,
           status: "Start Course",
-          image:
-            "https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=60",
+          image: "https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=60",
         },
         {
           id: 3,
@@ -95,8 +105,7 @@ export default {
           instructor: "Charles",
           progress: 100,
           status: "Complete",
-          image:
-            "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=60",
+          image: "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=60",
         },
         {
           id: 4,
@@ -105,8 +114,7 @@ export default {
           instructor: "Joseph",
           progress: 0,
           status: "Start Course",
-          image:
-            "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=800&q=60",
+          image: "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=800&q=60",
         },
         {
           id: 5,
@@ -115,8 +123,7 @@ export default {
           instructor: "Robert",
           progress: 100,
           status: "Complete",
-          image:
-            "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
+          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
         },
         {
           id: 6,
@@ -125,16 +132,38 @@ export default {
           instructor: "John",
           progress: 0,
           status: "Start Course",
-          image:
-            "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
+          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
         },
       ],
+      selectedCourseId: null,
+      isLoggedIn: false
     };
   },
   methods: {
     openCourseDetails(courseId) {
-  this.$router.push({ name: 'course-detail', params: { id: courseId } });
+      this.$router.push({ name: 'course-detail', params: { id: courseId } });
     },
+    getButtonText(course) {
+      if (course.progress === 0) return 'Start Now'
+      if (course.progress === 100) return 'View Certificate'
+      return 'Continue'
+    },
+    handleCourseAction(course) {
+      this.selectedCourseId = course.id
+      if (course.progress === 100) {
+        // Handle view certificate
+        alert('View certificate for ' + course.title)
+      } else {
+        // For static demo, we'll always show login
+        this.$refs.loginModal.openModal()
+      }
+    },
+     startCourse(courseId) {
+    this.$router.push({
+      name: 'course-learn',
+      params: { id: courseId }
+    })
+  }
   }
 };
 </script>

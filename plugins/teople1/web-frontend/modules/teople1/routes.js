@@ -43,4 +43,16 @@ export const routes = [
     component: path.resolve(__dirname, 'pages/course/CourseDetailPage.vue'),
     props: true,
   },
+  {
+    name: 'courselogin',
+    path: '/course/courselogin',
+    component: path.resolve(__dirname, 'pages/course/courselogin.vue'),
+    props: true,
+  },
+  {
+    name: 'course-learn',
+    path: '/course/courses/:id/learn',
+    component: path.resolve(__dirname, 'pages/course/CourseLearnPage.vue'),
+    props: true,
+  },
 ]

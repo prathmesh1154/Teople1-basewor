@@ -102,20 +102,30 @@
             </div>
           </div>
 
-          <button @click="toggleEnrollment" class="enroll-btn">
+          <button @click="handleEnrollClick" class="enroll-btn">
             {{ enrolled ? 'Continue Learning' : 'Enroll Now' }}
             <i class="fas fa-arrow-right"></i>
           </button>
         </div>
       </div>
     </div>
+
+    <login-modal
+      ref="loginModal"
+      @login-success="startCourse"
+    />
   </div>
 </template>
 
 <script>
+import LoginModal from './courselogin.vue'
+
 export default {
- layout: 'dashboard',
+  layout: 'dashboard',
   props: ['id'],
+  components: {
+    LoginModal
+  },
   data() {
     return {
       course: null,
@@ -137,78 +147,76 @@ export default {
   },
   methods: {
     fetchCourse() {
-     const allCourses = [
-  {
-    id: 1,
-    title: "Home Gardening Safety",
-    lessons: 3,
-    topics: 4,
-    quiz: 1,
-    description: "Gardening can be a fulfilling hobby, but...",
-    progress: 100,
-    status: "Complete",
-    image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: 2,
-    title: "Get Cash for Your Annuity",
-    lessons: 2,
-    topics: 3,
-    quiz: 1,
-    description: "Learn how to get cash for your annuity...",
-    progress: 0,
-    status: "Start Course",
-    image: "https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: 3,
-    title: "Concepts of Computer Engineering",
-    lessons: 3,
-    topics: 5,
-    quiz: 2,
-    description: "An introduction to the fundamentals of computer engineering...",
-    progress: 100,
-    status: "Complete",
-    image: "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: 4,
-    title: "The American Frontier",
-    lessons: 5,
-    topics: 6,
-    quiz: 2,
-    description: "Explore American history and the settling of the frontier...",
-    progress: 0,
-    status: "Start Course",
-    image: "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: 5,
-    title: "Cybersecurity Standards",
-    lessons: 5,
-    topics: 7,
-    quiz: 2,
-    description: "Understand the basics of cybersecurity practices and standards...",
-    progress: 100,
-    status: "Complete",
-    image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
-  },
-  {
-    id: 6,
-    title: "How to Fundraise",
-    lessons: 4,
-    topics: 2,
-    quiz: 1,
-    description: "Master modern fundraising strategies and campaigns...",
-    progress: 0,
-    status: "Start Course",
-    image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
-  },
-];
+      const allCourses = [
+        {
+          id: 1,
+          title: "Home Gardening Safety",
+          lessons: 3,
+          topics: 4,
+          quiz: 1,
+          description: "Gardening can be a fulfilling hobby, but it's important to follow safety guidelines to prevent injuries. This course covers essential safety practices for home gardeners.",
+          progress: 100,
+          status: "Complete",
+          image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60",
+        },
+        {
+          id: 2,
+          title: "Get Cash for Your Annuity",
+          lessons: 2,
+          topics: 3,
+          quiz: 1,
+          description: "Learn how to get cash for your annuity payments. We'll cover the process, legal considerations, and alternatives to selling your annuity.",
+          progress: 0,
+          status: "Start Course",
+          image: "https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=60",
+        },
+        {
+          id: 3,
+          title: "Concepts of Computer Engineering",
+          lessons: 3,
+          topics: 5,
+          quiz: 2,
+          description: "An introduction to the fundamentals of computer engineering, including hardware components, software principles, and system architecture.",
+          progress: 100,
+          status: "Complete",
+          image: "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=60",
+        },
+        {
+          id: 4,
+          title: "The American Frontier",
+          lessons: 5,
+          topics: 6,
+          quiz: 2,
+          description: "Explore American history and the settling of the frontier through primary sources and historical analysis.",
+          progress: 0,
+          status: "Start Course",
+          image: "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=800&q=60",
+        },
+        {
+          id: 5,
+          title: "Cybersecurity Standards",
+          lessons: 5,
+          topics: 7,
+          quiz: 2,
+          description: "Understand the basics of cybersecurity practices and standards that protect digital assets and infrastructure.",
+          progress: 100,
+          status: "Complete",
+          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
+        },
+        {
+          id: 6,
+          title: "How to Fundraise",
+          lessons: 4,
+          topics: 2,
+          quiz: 1,
+          description: "Master modern fundraising strategies and campaigns for nonprofits, startups, and community projects.",
+          progress: 0,
+          status: "Start Course",
+          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
+        },
+      ];
 
-
-     this.course = allCourses.find((c) => c.id === parseInt(this.id, 10));
-console.log("this.course",  this.course)
+      this.course = allCourses.find((c) => c.id === parseInt(this.id, 10));
       if (!this.course) {
         this.course = {
           title: "Course Not Found",
@@ -222,13 +230,26 @@ console.log("this.course",  this.course)
         };
       }
     },
-    toggleEnrollment() {
-      this.enrolled = !this.enrolled;
-    },
-  },
+    handleEnrollClick() {
+  if (!this.enrolled) {
+    this.enrolled = true
+  }
+  this.$router.push({
+    name: 'course-learn',
+    params: { id: this.course.id }
+  })
+},
+startCourse() {
+  this.enrolled = true
+  this.$router.push({
+    name: 'course-learn',
+    params: { id: this.course.id }
+  })
+}
+
+  }
 };
 </script>
-
 <style scoped>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');

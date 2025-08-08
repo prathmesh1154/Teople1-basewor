@@ -5,10 +5,11 @@ from rest_framework.permissions import AllowAny
 from baserow.contrib.database.table.models import Table
 from baserow.contrib.database.models import Database
 from django.core.exceptions import ObjectDoesNotExist
-from datetime import datetime
+from datetime import datetime ,timedelta
 from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
+
 
 
 class StartingView(APIView):
@@ -674,3 +675,506 @@ class CategoriesView(APIView):
                 "code": "delete_failed",
                 "details": str(e)
             }, status=500)
+
+
+
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework import status
+from django.contrib.auth.hashers import make_password, check_password
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UserRegisterView(APIView):
+    permission_classes = (AllowAny,)
+
+    # Corrected FIELD_MAPPING based on your error
+    FIELD_MAPPING = {
+        'username': 'field_88',  # Text field
+        'email': 'field_89',  # Text field
+        'password': 'field_93',  # <-- This was the problem field (should be text/long text)
+        'first_name': 'field_91',  # Text field
+        'last_name': 'field_92',  # Text field
+        'is_active': 'field_90',  # <-- Changed to boolean field
+        'roles': 'field_94',  # Multiple select field
+        'last_login': 'field_95'  # Date field
+    }
+
+    def get_model(self):
+        try:
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name="Users")
+            return table.get_model()
+        except Exception as e:
+            logger.error(f"Error getting Users model: {str(e)}")
+            raise ValueError(f"Error accessing database: {str(e)}")
+
+    def post(self, request):
+        try:
+            model = self.get_model()
+            data = request.data
+
+            # Debug: Print actual field types
+            fields = model._meta.get_fields()
+            field_types = {f.name: f.get_internal_type() for f in fields if hasattr(f, 'get_internal_type')}
+            logger.debug(f"Actual field types: {field_types}")
+
+            # Validate required fields
+            required_fields = ['username', 'email', 'password']
+            for field in required_fields:
+                if not data.get(field):
+                    return Response({
+                        "status": "error",
+                        "message": f"{field} is required"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for existing user
+            if model.objects.filter(**{self.FIELD_MAPPING['username']: data['username']}).exists():
+                return Response({
+                    "status": "error",
+                    "message": "Username already exists"
+                }, status=status.HTTP_409_CONFLICT)
+
+            if model.objects.filter(**{self.FIELD_MAPPING['email']: data['email']}).exists():
+                return Response({
+                    "status": "error",
+                    "message": "Email already exists"
+                }, status=status.HTTP_409_CONFLICT)
+
+            # Prepare user data with correct field mapping
+            user_data = {
+                self.FIELD_MAPPING['username']: data['username'],
+                self.FIELD_MAPPING['email']: data['email'],
+                self.FIELD_MAPPING['password']: make_password(data['password']),
+                self.FIELD_MAPPING['first_name']: data.get('first_name', ''),
+                self.FIELD_MAPPING['last_name']: data.get('last_name', ''),
+                self.FIELD_MAPPING['is_active']: True,  # Must be boolean
+                self.FIELD_MAPPING['roles']: ["user"]  # Must be array for multiple select
+            }
+
+            # Create user
+            user = model.objects.create(**user_data)
+
+            return Response({
+                "status": "success",
+                "message": "User registered successfully",
+                "user": {
+                    "id": user.id,
+                    "username": getattr(user, self.FIELD_MAPPING['username']),
+                    "email": getattr(user, self.FIELD_MAPPING['email'])
+                }
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Registration error: {str(e)}", exc_info=True)
+
+            # Get actual field names and types for debugging
+            fields_info = []
+            if 'model' in locals():
+                fields = model._meta.get_fields()
+                fields_info = [f"{f.name} ({f.get_internal_type()})" for f in fields if hasattr(f, 'get_internal_type')]
+
+            return Response({
+                "status": "error",
+                "message": "Registration failed",
+                "error": str(e),
+                "field_mapping": self.FIELD_MAPPING,
+                "actual_fields": fields_info
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UserLoginView(APIView):
+    permission_classes = (AllowAny,)
+
+    # Updated to match the corrected FIELD_MAPPING
+    FIELD_MAPPING = {
+        'username': 'field_88',
+        'password': 'field_93',
+        'is_active': 'field_90',
+        'last_login': 'field_95',
+        'roles': 'field_94',
+        'email': 'field_89'
+    }
+
+    def get_model(self):
+        try:
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name="Users")
+            return table.get_model()
+        except Exception as e:
+            logger.error(f"Error getting Users model: {str(e)}")
+            raise
+
+    def post(self, request):
+        try:
+            model = self.get_model()
+            data = request.data
+
+            if not data.get('username') or not data.get('password'):
+                return Response({
+                    "status": "error",
+                    "message": "Username and password are required"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            user = model.objects.filter(**{self.FIELD_MAPPING['username']: data['username']}).first()
+            if not user:
+                return Response({
+                    "status": "error",
+                    "message": "Invalid credentials"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not check_password(data['password'], getattr(user, self.FIELD_MAPPING['password'])):
+                return Response({
+                    "status": "error",
+                    "message": "Invalid credentials"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not getattr(user, self.FIELD_MAPPING['is_active']):
+                return Response({
+                    "status": "error",
+                    "message": "Account is inactive"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Update last login
+            setattr(user, self.FIELD_MAPPING['last_login'], datetime.now())
+            user.save()
+
+            # Create session
+            request.session['user_id'] = user.id
+            request.session.set_expiry(86400)
+
+            return Response({
+                "status": "success",
+                "message": "Login successful",
+                "user": {
+                    "id": user.id,
+                    "username": getattr(user, self.FIELD_MAPPING['username']),
+                    "email": getattr(user, self.FIELD_MAPPING['email']),
+                    "roles": getattr(user, self.FIELD_MAPPING['roles'], [])
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Login error: {str(e)}")
+            return Response({
+                "status": "error",
+                "message": "Login failed",
+                "error": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UserLogoutView(APIView):
+    def post(self, request):
+        try:
+            if 'user_id' in request.session:
+                user_id = request.session['user_id']
+                request.session.flush()
+                logger.info(f"User {user_id} logged out")
+
+            return Response({
+                "status": "success",
+                "message": "Logged out successfully"
+            })
+        except Exception as e:
+            logger.error(f"Logout error: {str(e)}")
+            return Response({
+                "status": "error",
+                "message": "Logout failed"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class BaseBaserowView(APIView):
+    """Base view for Baserow table operations"""
+
+    DATABASE_NAME = "prathmesh"
+
+    def get_model_and_table(self,cources):
+        """Helper method to get the model and table with error handling"""
+        try:
+            database = Database.objects.get(name=self.DATABASE_NAME)
+            table = Table.objects.get(database=database, name=cources)
+            model = table.get_model()
+            return model, table
+        except Database.DoesNotExist:
+            logger.error(f"Database '{self.DATABASE_NAME}' not found")
+            raise ValueError(f"Database '{self.DATABASE_NAME}' not found")
+        except Table.DoesNotExist:
+            logger.error(f"Table '{cources}' not found")
+            raise ValueError(f"Table '{cources}' not found")
+        except Exception as e:
+            logger.error(f"Error getting model and table: {str(e)}")
+            raise
+
+    def serialize_field_value(self, field_obj, field_value):
+        """Enhanced field value serialization with proper link row handling"""
+        if field_value is None:
+            return None
+
+        field_type = field_obj['type'].type
+
+        try:
+            # Handle link row fields
+            if field_type == 'link_row':
+                target_table = getattr(field_obj['type'], 'get_target_table', lambda: None)()
+                if not target_table:
+                    target_table = getattr(field_obj['type'], 'link_row_table', None)
+
+                if target_table:
+                    related_model = target_table.get_model()
+                    return {
+                        'ids': list(field_value.values_list('id', flat=True)),
+                        'objects': [
+                            {'id': obj.id, 'name': str(obj)}
+                            for obj in field_value.all()[:100]  # Limit to 100
+                        ]
+                    }
+                return []
+
+            # Handle other field types
+            if field_type == 'number':
+                return float(field_value) if field_value is not None else None
+            elif field_type == 'boolean':
+                return bool(field_value)
+            elif field_type in ['last_modified', 'created_on', 'date']:
+                return field_value.isoformat() if hasattr(field_value, 'isoformat') else str(field_value)
+            elif field_type == 'multiple_select':
+                if isinstance(field_value, list):
+                    return [str(v) for v in field_value]
+                return [str(field_value)] if field_value else []
+            elif field_type == 'single_select':
+                if field_value and hasattr(field_value, 'value'):
+                    return field_value.value
+                return str(field_value) if field_value else None
+
+            return field_value
+
+        except Exception as e:
+            logger.error(f"Error serializing field {field_obj['field'].name}: {str(e)}")
+            return None
+
+    def get_object_data(self, obj):
+        """Enhanced object data serialization with proper field handling"""
+        try:
+            field_objects = obj.get_field_objects()
+            obj_data = {
+                'id': obj.id,
+                'created_on': obj.created_on.isoformat() if obj.created_on else None,
+                'updated_on': obj.updated_on.isoformat() if obj.updated_on else None
+            }
+
+            for field_obj in field_objects:
+                field_name = field_obj['field'].name
+                field_value = getattr(obj, f'field_{field_obj["field"].id}')
+                obj_data[field_name] = self.serialize_field_value(field_obj, field_value)
+
+            return obj_data
+
+        except Exception as e:
+            logger.error(f"Error serializing object data: {str(e)}")
+            raise ValueError(f"Error serializing object: {str(e)}")
+
+
+class CourseView(BaseBaserowView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request, course_id=None):
+        try:
+            model, _ = self.get_model_and_table("Courses")
+
+            if course_id:
+                course = model.objects.get(id=course_id)
+                return Response({
+                    "status": "success",
+                    "course": self.get_object_data(course)
+                })
+
+            courses = model.objects.all()
+            courses_data = [self.get_object_data(course) for course in courses]
+
+            return Response({
+                "status": "success",
+                "count": len(courses_data),
+                "courses": courses_data
+            })
+
+        except ObjectDoesNotExist:
+            return Response({"status": "error", "message": "Course not found"}, status=404)
+        except ValueError as e:
+            return Response({"status": "error", "message": str(e)}, status=400)
+        except Exception as e:
+            logger.error(f"Error in GET request: {str(e)}")
+            return Response({"status": "error", "message": str(e)}, status=500)
+
+
+class LessonView(BaseBaserowView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request, course_id=None, lesson_id=None):
+        try:
+            model, _ = self.get_model_and_table("Lessons")
+
+            if lesson_id:
+                lesson = model.objects.get(id=lesson_id)
+                return Response({
+                    "status": "success",
+                    "lesson": self.get_object_data(lesson)
+                })
+
+            # Filter lessons by course if course_id provided
+            if course_id:
+                lessons = model.objects.filter(field_1=[course_id])  # field_1 should be the link to Courses
+            else:
+                lessons = model.objects.all()
+
+            lessons_data = [self.get_object_data(lesson) for lesson in lessons]
+
+            return Response({
+                "status": "success",
+                "count": len(lessons_data),
+                "lessons": lessons_data
+            })
+
+        except ObjectDoesNotExist:
+            return Response({"status": "error", "message": "Lesson not found"}, status=404)
+        except ValueError as e:
+            return Response({"status": "error", "message": str(e)}, status=400)
+        except Exception as e:
+            logger.error(f"Error in GET request: {str(e)}")
+            return Response({"status": "error", "message": str(e)}, status=500)
+
+
+class EnrollmentView(BaseBaserowView):
+    permission_classes = (AllowAny,)
+
+    def post(self, request, course_id):
+        try:
+            # Get the Courses and Enrollments tables
+            course_model, _ = self.get_model_and_table("Courses")
+            enrollment_model, _ = self.get_model_and_table("Enrollments")
+
+            # Check if course exists
+            course = course_model.objects.get(id=course_id)
+
+            # Check if user is already enrolled
+            existing_enrollment = enrollment_model.objects.filter(
+                field_1=request.user.id,  # field_1 should be link to Users
+                field_2=course_id  # field_2 should be link to Courses
+            ).first()
+
+            if existing_enrollment:
+                return Response({
+                    "status": "success",
+                    "message": "Already enrolled",
+                    "enrollment": self.get_object_data(existing_enrollment)
+                }, status=200)
+
+            # Create new enrollment
+            enrollment_data = {
+                'field_1': [request.user.id],  # User
+                'field_2': [course_id],  # Course
+                'field_3': 0,  # Progress
+                'field_4': False,  # Completed
+                'field_5': datetime.now().isoformat()  # Enrolled date
+            }
+
+            enrollment = enrollment_model.objects.create(**enrollment_data)
+
+            return Response({
+                "status": "success",
+                "message": "Enrolled successfully",
+                "enrollment": self.get_object_data(enrollment)
+            }, status=201)
+
+        except ObjectDoesNotExist:
+            return Response({"status": "error", "message": "Course not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error enrolling: {str(e)}")
+            return Response({"status": "error", "message": str(e)}, status=500)
+
+
+class UserProgressView(BaseBaserowView):
+    permission_classes = (AllowAny,)
+
+    def post(self, request, lesson_id):
+        try:
+            # Get the Lessons and UserProgress tables
+            lesson_model, _ = self.get_model_and_table("Lessons")
+            progress_model, _ = self.get_model_and_table("UserProgress")
+
+            # Check if lesson exists and get course
+            lesson = lesson_model.objects.get(id=lesson_id)
+            course_id = lesson.field_1[0]  # Assuming field_1 links to Courses
+
+            # Check if user is enrolled in the course
+            enrollment_model, _ = self.get_model_and_table("Enrollments")
+            enrollment = enrollment_model.objects.filter(
+                field_1=request.user.id,
+                field_2=course_id
+            ).first()
+
+            if not enrollment:
+                return Response({
+                    "status": "error",
+                    "message": "Not enrolled in this course"
+                }, status=403)
+
+            # Check if progress already exists
+            existing_progress = progress_model.objects.filter(
+                field_1=request.user.id,  # User
+                field_2=lesson_id  # Lesson
+            ).first()
+
+            if existing_progress:
+                return Response({
+                    "status": "success",
+                    "message": "Already completed",
+                    "progress": self.get_object_data(existing_progress)
+                }, status=200)
+
+            # Create new progress record
+            progress_data = {
+                'field_1': [request.user.id],  # User
+                'field_2': [lesson_id],  # Lesson
+                'field_3': True,  # Completed
+                'field_4': datetime.now().isoformat()  # Completed date
+            }
+
+            progress = progress_model.objects.create(**progress_data)
+
+            # Update enrollment progress
+            total_lessons = lesson_model.objects.filter(field_1=course_id).count()
+            completed_lessons = progress_model.objects.filter(
+                field_1=request.user.id,
+                field_2__in=[l.id for l in lesson_model.objects.filter(field_1=course_id)]
+            ).count()
+
+            new_progress = int((completed_lessons / total_lessons) * 100)
+            enrollment.field_3 = new_progress  # Progress field
+
+            if new_progress == 100:
+                enrollment.field_4 = True  # Completed field
+
+            enrollment.save()
+
+            return Response({
+                "status": "success",
+                "message": "Progress updated",
+                "progress": self.get_object_data(progress),
+                "course_progress": new_progress
+            }, status=201)
+
+        except ObjectDoesNotExist:
+            return Response({"status": "error", "message": "Lesson not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error updating progress: {str(e)}")
+            return Response({"status": "error", "message": str(e)}, status=500)
+
+
