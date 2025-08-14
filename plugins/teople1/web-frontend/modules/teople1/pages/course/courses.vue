@@ -3,28 +3,28 @@
     <div class="header-section">
       <h1 class="page-title">Available Courses</h1>
       <div class="search-filter">
-        <input type="text" placeholder="Search courses..." class="search-input">
-        <select class="filter-select">
-          <option>All Courses</option>
-          <option>In Progress</option>
-          <option>Completed</option>
-          <option>Not Started</option>
+        <input type="text" placeholder="Search courses..." class="search-input" v-model="searchQuery" @input="filterCourses" />
+        <select class="filter-select" v-model="filterStatus" @change="filterCourses">
+          <option value="all">All Courses</option>
+          <option value="in-progress">In Progress</option>
+          <option value="completed">Completed</option>
+          <option value="not-started">Not Started</option>
         </select>
       </div>
     </div>
 
     <div class="courses-grid">
       <div
-        v-for="(course, index) in courses"
+        v-for="course in filteredCourses"
         :key="course.id"
         class="course-card"
       >
         <div class="course-image-container" @click="openCourseDetails(course.id)">
           <img :src="course.image" :alt="course.title" class="course-image" />
-          <span class="course-status" :class="course.status.toLowerCase().replace(/\s+/g, '-')">
+          <span class="course-status" :class="statusClass(course.status)">
             {{ course.status }}
           </span>
-          <div class="course-category">Lifestyle</div>
+          <div class="course-category">{{ course.category }}</div>
         </div>
 
         <div class="course-content">
@@ -39,7 +39,7 @@
 
           <h2 class="course-title" @click="openCourseDetails(course.id)">{{ course.title }}</h2>
 
-          <div class="course-progress">
+          <div class="course-progress" v-if="course.lessons > 0">
             <div class="progress-info">
               <span class="progress-text">{{ course.progress }}% Complete</span>
             </div>
@@ -69,6 +69,7 @@
 </template>
 
 <script>
+import axios from 'axios'
 import LoginModal from './courselogin.vue'
 
 export default {
@@ -79,69 +80,76 @@ export default {
   },
   data() {
     return {
-      courses: [
-        {
-          id: 1,
-          title: "Home Gardening Safety",
-          lessons: 3,
-          instructor: "Arianna",
-          progress: 100,
-          status: "Complete",
-          image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 2,
-          title: "Get Cash for Your Annuity",
-          lessons: 2,
-          instructor: "Adele",
-          progress: 0,
-          status: "Start Course",
-          image: "https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 3,
-          title: "Concepts of Computer Engineering",
-          lessons: 3,
-          instructor: "Charles",
-          progress: 100,
-          status: "Complete",
-          image: "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 4,
-          title: "The American Frontier",
-          lessons: 5,
-          instructor: "Joseph",
-          progress: 0,
-          status: "Start Course",
-          image: "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 5,
-          title: "Cybersecurity Standards",
-          lessons: 5,
-          instructor: "Robert",
-          progress: 100,
-          status: "Complete",
-          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 6,
-          title: "How to Fundraise",
-          lessons: 4,
-          instructor: "John",
-          progress: 0,
-          status: "Start Course",
-          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
-        },
-      ],
+      courses: [],
+      filteredCourses: [],
       selectedCourseId: null,
-      isLoggedIn: false
+      isLoggedIn: false,
+      searchQuery: '',
+      filterStatus: 'all',
     };
   },
+  created() {
+    this.fetchCourses()
+  },
   methods: {
+    async fetchProgress() {
+      try {
+        const res = await axios.get('http://localhost/api/teople1/progress/')
+        if (res.data.status === 'success') {
+          return res.data.progress || []
+        }
+        return []
+      } catch (err) {
+        console.error('Error fetching progress:', err)
+        return []
+      }
+    },
+    async fetchCourses() {
+      try {
+        const courseRes = await axios.get('http://localhost/api/teople1/courses/')
+        const progressList = await this.fetchProgress()
+
+        if (courseRes.data.status === 'success') {
+          const mappedCourses = courseRes.data.courses.map(c => {
+            // Find matching progress item by course ID
+            let progressItem = progressList.find(p =>
+              p.course && p.course.some(co => co.id === c.id)
+            )
+
+            // Calculate progress percent based on lessons completed
+            let totalLessons = c.Lessons.length || 0
+            let completedLessons = progressItem && progressItem.lesson ? progressItem.lesson.length : 0
+            let progress = totalLessons ? Math.floor((completedLessons / totalLessons) * 100) : 0
+
+            // Determine status based on progress
+            let status = 'Not Started'
+            if (progress === 100) {
+              status = 'Completed'
+            } else if (progress > 0) {
+              status = 'In Progress'
+            }
+
+            return {
+              id: c.id,
+              title: c.Title || 'Untitled Course',
+              lessons: totalLessons,
+              instructor: 'N/A', // API does not provide instructor info
+              progress,
+              status,
+              image: c.image_url || 'https://via.placeholder.com/340x180?text=No+Image',
+              category: c.category || '',
+            }
+          })
+
+          this.courses = mappedCourses
+          this.filteredCourses = [...mappedCourses]
+        }
+      } catch (err) {
+        console.error('Error fetching courses:', err)
+      }
+    },
     openCourseDetails(courseId) {
-      this.$router.push({ name: 'course-detail', params: { id: courseId } });
+      this.$router.push({ name: 'course-detail', params: { id: courseId } })
     },
     getButtonText(course) {
       if (course.progress === 0) return 'Start Now'
@@ -151,19 +159,55 @@ export default {
     handleCourseAction(course) {
       this.selectedCourseId = course.id
       if (course.progress === 100) {
-        // Handle view certificate
-        alert('View certificate for ' + course.title)
+        alert(`View certificate for ${course.title}`)
       } else {
-        // For static demo, we'll always show login
-        this.$refs.loginModal.openModal()
+        this.$router.push({
+          name: 'course-detail',
+          params: { id: course.id }
+        })
       }
     },
-     startCourse(courseId) {
-    this.$router.push({
-      name: 'course-learn',
-      params: { id: courseId }
-    })
-  }
+    startCourse(courseId) {
+      this.$router.push({
+        name: 'course-learn',
+        params: { id: courseId }
+      })
+    },
+    statusClass(status) {
+      switch (status.toLowerCase()) {
+        case 'completed':
+          return 'complete'
+        case 'in progress':
+          return 'in-progress'
+        case 'not started':
+        default:
+          return 'not-started'
+      }
+    },
+    filterCourses() {
+      let filtered = this.courses
+
+      if (this.searchQuery.trim() !== '') {
+        const q = this.searchQuery.toLowerCase()
+        filtered = filtered.filter(c =>
+          c.title.toLowerCase().includes(q) ||
+          c.category.toLowerCase().includes(q) ||
+          c.instructor.toLowerCase().includes(q)
+        )
+      }
+
+      if (this.filterStatus !== 'all') {
+        // Map filter value to status string
+        const statusMap = {
+          'in-progress': 'In Progress',
+          'completed': 'Completed',
+          'not-started': 'Not Started'
+        }
+        filtered = filtered.filter(c => c.status === statusMap[this.filterStatus])
+      }
+
+      this.filteredCourses = filtered
+    }
   }
 };
 </script>
@@ -297,16 +341,19 @@ export default {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  color: white;
 }
 
 .course-status.complete {
   background: linear-gradient(135deg, #2ecc71, #27ae60);
-  color: white;
 }
 
-.course-status.start-course {
+.course-status.in-progress {
   background: linear-gradient(135deg, #f39c12, #e67e22);
-  color: white;
+}
+
+.course-status.not-started {
+  background: linear-gradient(135deg, #95a5a6, #7f8c8d);
 }
 
 .course-category {

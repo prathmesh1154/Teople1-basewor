@@ -1,8 +1,10 @@
 <template>
-  <div class="course-detail-page">
+  <div class="course-detail-page" v-if="course">
     <div
       class="course-header-image"
-      :style="{ backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url(${course.image})` }"
+      :style="{
+        backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url(${course.image})`
+      }"
     >
       <div class="course-header-content">
         <div class="header-top">
@@ -26,8 +28,8 @@
 
         <div class="header-main">
           <div class="course-meta">
-            <span class="course-category">Lifestyle</span>
-            <span class="course-duration"><i class="far fa-clock"></i> 3h 45m</span>
+            <span class="course-category">{{ course.category }}</span>
+            <span class="course-duration"><i class="far fa-clock"></i> {{ formattedDuration }}</span>
           </div>
 
           <h1 class="course-title">{{ course.title }}</h1>
@@ -102,8 +104,12 @@
             </div>
           </div>
 
-          <button @click="handleEnrollClick" class="enroll-btn">
-            {{ enrolled ? 'Continue Learning' : 'Enroll Now' }}
+          <button
+            @click="handleEnrollClick"
+            class="enroll-btn"
+            :disabled="enrolling"
+          >
+            {{ enrolled ? 'Continue Learning' : enrolling ? 'Enrolling...' : 'Enroll Now' }}
             <i class="fas fa-arrow-right"></i>
           </button>
         </div>
@@ -115,144 +121,211 @@
       @login-success="startCourse"
     />
   </div>
+  <div v-else class="loading-message" style="padding: 20px; text-align: center;">
+    Loading course details...
+  </div>
 </template>
 
 <script>
-import LoginModal from './courselogin.vue'
+import axios from 'axios';
+import LoginModal from './courselogin.vue';
 
 export default {
   layout: 'dashboard',
   props: ['id'],
   components: {
-    LoginModal
+    LoginModal,
   },
   data() {
     return {
       course: null,
       enrolled: false,
+      enrolling: false, // Loading state for enrollment
       enrolledUsers: [
         { avatar: 'https://randomuser.me/api/portraits/women/1.jpg' },
         { avatar: 'https://randomuser.me/api/portraits/men/2.jpg' },
         { avatar: 'https://randomuser.me/api/portraits/women/3.jpg' },
       ],
+      currentUser: { id: 38, username: 'Abhishek10' } // Replace with your actual user management
     };
   },
   computed: {
     additionalEnrolledCount() {
       return 19;
     },
+    formattedDuration() {
+      if (!this.course || !this.course.duration) return '';
+      let durationMs = Number(this.course.duration);
+      if (durationMs < 1000 * 60) {
+        durationMs *= 1000;
+      }
+      const totalMinutes = Math.floor(durationMs / (1000 * 60));
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return `${hours}h ${minutes}m`;
+    },
   },
-  created() {
-    this.fetchCourse();
+  async created() {
+    await this.fetchCourse();
+    await this.checkEnrollmentStatus();
+    await this.fetchCourseProgress();
   },
-  methods: {
-    fetchCourse() {
-      const allCourses = [
-        {
-          id: 1,
-          title: "Home Gardening Safety",
-          lessons: 3,
-          topics: 4,
-          quiz: 1,
-          description: "Gardening can be a fulfilling hobby, but it's important to follow safety guidelines to prevent injuries. This course covers essential safety practices for home gardeners.",
-          progress: 100,
-          status: "Complete",
-          image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 2,
-          title: "Get Cash for Your Annuity",
-          lessons: 2,
-          topics: 3,
-          quiz: 1,
-          description: "Learn how to get cash for your annuity payments. We'll cover the process, legal considerations, and alternatives to selling your annuity.",
-          progress: 0,
-          status: "Start Course",
-          image: "https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 3,
-          title: "Concepts of Computer Engineering",
-          lessons: 3,
-          topics: 5,
-          quiz: 2,
-          description: "An introduction to the fundamentals of computer engineering, including hardware components, software principles, and system architecture.",
-          progress: 100,
-          status: "Complete",
-          image: "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 4,
-          title: "The American Frontier",
-          lessons: 5,
-          topics: 6,
-          quiz: 2,
-          description: "Explore American history and the settling of the frontier through primary sources and historical analysis.",
-          progress: 0,
-          status: "Start Course",
-          image: "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 5,
-          title: "Cybersecurity Standards",
-          lessons: 5,
-          topics: 7,
-          quiz: 2,
-          description: "Understand the basics of cybersecurity practices and standards that protect digital assets and infrastructure.",
-          progress: 100,
-          status: "Complete",
-          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
-        },
-        {
-          id: 6,
-          title: "How to Fundraise",
-          lessons: 4,
-          topics: 2,
-          quiz: 1,
-          description: "Master modern fundraising strategies and campaigns for nonprofits, startups, and community projects.",
-          progress: 0,
-          status: "Start Course",
-          image: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=800&q=60",
-        },
-      ];
-
-      this.course = allCourses.find((c) => c.id === parseInt(this.id, 10));
-      if (!this.course) {
-        this.course = {
-          title: "Course Not Found",
-          lessons: 0,
-          topics: 0,
-          quiz: 0,
-          description: "The course you are looking for does not exist.",
-          progress: 0,
-          status: "N/A",
-          image: "",
-        };
+  watch: {
+    id(newId, oldId) {
+      if (newId !== oldId) {
+        this.fetchCourse();
+        this.fetchCourseProgress();
       }
     },
-    handleEnrollClick() {
-  if (!this.enrolled) {
-    this.enrolled = true
-  }
-  this.$router.push({
-    name: 'course-learn',
-    params: { id: this.course.id }
-  })
-},
-startCourse() {
-  this.enrolled = true
-  this.$router.push({
-    name: 'course-learn',
-    params: { id: this.course.id }
-  })
-}
+  },
+  methods: {
+    async fetchCourse() {
+      try {
+        const response = await axios.get(`http://localhost/api/teople1/courses/${this.id}/`);
+        if (response.data.status === 'success') {
+          const c = response.data.course;
+          this.course = {
+            id: c.id,
+            title: c.Title || 'Untitled Course',
+            lessons: c.Lessons ? c.Lessons.length : 0,
+            topics: 0,
+            quiz: 0,
+            description: c.Description ? c.Description.replace(/```/g, '') : '',
+            progress: 0,
+            status: c.status || 'Not Started',
+            image: c.image_url || '',
+            category: c.category || 'N/A',
+            duration: c.Duration || 0,
+            price: c.Price || 0,
+          };
+        } else {
+          this.course = null;
+          console.error('Failed to fetch course');
+        }
+      } catch (error) {
+        console.error('Error fetching course:', error);
+        this.course = null;
+      }
+    },
 
-  }
+    async fetchCourseProgress() {
+      try {
+        const res = await axios.get('http://localhost/api/teople1/progress/');
+        if (res.data.status === 'success') {
+          const progressRecord = res.data.progress.find(
+            p =>
+              p.user.some(u => u.value === this.currentUser.username) &&
+              p.course.some(c => c.id === this.course.id)
+          );
+
+          if (progressRecord) {
+            const totalLessons = progressRecord.lesson.length || 1; // avoid divide by zero
+            const completedLessons = Number(progressRecord.completed) || 0;
+            const percentage = Math.round((completedLessons / totalLessons) * 100);
+            this.course.progress = percentage;
+          } else {
+            this.course.progress = 0;
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching progress:', error);
+        this.course.progress = 0;
+      }
+    },
+
+    async checkEnrollmentStatus() {
+      try {
+        const response = await axios.get('http://localhost/api/teople1/enrollments/');
+        if (response.data.status === 'success') {
+          const isEnrolled = response.data.enrollments.some(
+            e =>
+              e.user.some(u => u.value === this.currentUser.username) &&
+              e.course.some(c => c.id === this.course.id)
+          );
+          this.enrolled = isEnrolled;
+        } else {
+          this.enrolled = false;
+        }
+      } catch (error) {
+        console.error('Error checking enrollment:', error);
+        this.enrolled = false;
+      }
+    },
+
+    async handleEnrollClick() {
+      if (this.enrolling) return;
+
+      if (!this.enrolled) {
+        this.enrolling = true;
+        try {
+          const enrollmentsRes = await axios.get('http://localhost/api/teople1/enrollments/');
+          const nextOrder = (enrollmentsRes.data.count + 1).toFixed(20);
+
+          const payload = {
+            order: nextOrder,
+            Name: "",
+            "Fields: id": this.currentUser.id,
+            user: [
+              { id: this.currentUser.id, value: this.currentUser.username }
+            ],
+            course: [
+              { id: this.course.id, value: this.course.title }
+            ],
+            enrollment_date: new Date().toISOString(),
+            status: "active",
+            completion_date: null
+          };
+
+          const response = await axios.post(
+            'http://localhost/api/teople1/enrollments/',
+            payload
+          );
+
+          if (response.data.status === 'success') {
+            this.enrolled = true;
+            await this.fetchCourseProgress(); // refresh progress after enroll
+            this.$router.push({
+              name: 'course-learn',
+              params: { id: this.course.id }
+            });
+          } else {
+            throw new Error('Enrollment failed');
+          }
+        } catch (error) {
+          console.error('Enrollment failed:', error);
+          if (error.response?.status === 401) {
+            this.$refs.loginModal.show();
+            return;
+          }
+          alert('Failed to enroll. Please try again.');
+        } finally {
+          this.enrolling = false;
+        }
+      } else {
+        this.$router.push({
+          name: 'course-learn',
+          params: { id: this.course.id }
+        });
+      }
+    },
+
+    startCourse() {
+      this.enrolled = true;
+      this.$router.push({
+        name: 'course-learn',
+        params: { id: this.course.id },
+      });
+    },
+  },
 };
 </script>
+
+
 <style scoped>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+/* (Rest of your CSS styles unchanged from your original) */
 
 .course-detail-page {
   font-family: 'Poppins', sans-serif;

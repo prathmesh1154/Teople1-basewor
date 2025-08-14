@@ -1,30 +1,47 @@
 from django.urls import re_path
-from .views import StartingView, TasksView, CategoriesView, UserRegisterView, UserLoginView, UserLogoutView, CourseView,LessonView,EnrollmentView,UserProgressView
-
-
+from .views import (
+    StartingView,
+    TasksView,
+    CategoriesView,
+    UserRegisterView,
+    UserLoginView,
+    UserLogoutView,
+    CoursesView,
+    LessonsView,
+    EnrollmentsView,
+    ProgressView,
+)
 
 app_name = "teople1.api"
 
 urlpatterns = [
     re_path(r"starting/$", StartingView.as_view(), name="starting"),
-    re_path(r"tasks/$", TasksView.as_view(), name="tasks"),  # New endpoints
+
+    re_path(r"tasks/$", TasksView.as_view(), name="tasks"),
     re_path(r"tasks/(?P<task_id>\d+)/$", TasksView.as_view(), name="task_detail"),
+
     re_path(r"categories/$", CategoriesView.as_view(), name="categories"),
     re_path(r"categories/(?P<category_id>\d+)/$", CategoriesView.as_view(), name="category_detail"),
+
     re_path(r"users/register/$", UserRegisterView.as_view(), name="user_register"),
     re_path(r"users/login/$", UserLoginView.as_view(), name="user_login"),
     re_path(r"users/logout/$", UserLogoutView.as_view(), name="user_logout"),
-    re_path(r"courses/$", CourseView.as_view(), name="course_list"),
-    re_path(r"courses/(?P<course_id>\d+)/$", CourseView.as_view(), name="course_detail"),
 
-    # Lesson management
-    re_path(r"lessons/$", LessonView.as_view(), name="lesson_list"),
-    re_path(r"lessons/(?P<lesson_id>\d+)/$", LessonView.as_view(), name="lesson_detail"),
-    re_path(r"courses/(?P<course_id>\d+)/lessons/$", LessonView.as_view(), name="course_lessons"),
+    # Courses endpoints
+    re_path(r"courses/$", CoursesView.as_view(), name="courses"),
+    re_path(r"courses/(?P<course_id>\d+)/$", CoursesView.as_view(), name="course_detail"),
 
-    # Enrollment management
-    re_path(r"courses/(?P<course_id>\d+)/enroll/$", EnrollmentView.as_view(), name="course_enroll"),
+    # Lessons endpoints nested under courses
+    re_path(r"lessons/$", LessonsView.as_view(), name="course_lessons"),
+    re_path(r"lessons/(?P<lesson_id>\d+)/$", LessonsView.as_view(), name="lesson_detail"),
 
-    # Progress tracking
-    re_path(r"lessons/(?P<lesson_id>\d+)/complete/$", UserProgressView.as_view(), name="lesson_complete"),
+    # Enrollments endpoints nested under courses
+    re_path(r"enrollments/$", EnrollmentsView.as_view(), name="course_enrollments"),
+    re_path(r"enrollments/(?P<enrollment_id>\d+)/$", EnrollmentsView.as_view(),
+            name="enrollment_detail"),
+
+    # Progress endpoints nested under courses
+    re_path(r"progress/$", ProgressView.as_view(), name="course_progress"),
+    re_path(r"progress/(?P<lesson_id>\d+)/$", ProgressView.as_view(),
+            name="lesson_progress"),
 ]

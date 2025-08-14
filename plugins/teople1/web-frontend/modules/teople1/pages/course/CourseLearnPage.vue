@@ -2,7 +2,6 @@
   <div class="dashboard-container">
     <div class="dashboard-content">
       <div class="course-learning-container">
-        <!-- Course header section -->
         <div class="course-header">
           <div class="header-top">
             <button class="back-button" @click="$router.go(-1)">
@@ -18,7 +17,7 @@
           <h1>{{ course.title }}</h1>
           <div class="course-meta">
             <span class="meta-item">
-              <i class="fas fa-book-open"></i> {{ completedLessons }}/{{ lessons.length }} Lessons
+              <i class="fas fa-book-open"></i> {{ completedLessons }}/{{ filteredLessons.length }} Lessons
             </span>
             <span class="meta-item">
               <i class="fas fa-clock"></i> {{ totalDuration }} min
@@ -26,9 +25,7 @@
           </div>
         </div>
 
-        <!-- Main content area -->
         <div class="course-main-content">
-          <!-- Lessons sidebar -->
           <div class="lessons-sidebar">
             <div class="sidebar-header">
               <h3>Course Content</h3>
@@ -36,53 +33,52 @@
             </div>
             <div class="lessons-list">
               <div
-                v-for="(lesson, index) in lessons"
+                v-for="(lesson, index) in filteredLessons"
                 :key="lesson.id"
                 class="lesson-item"
                 :class="{
                   active: currentLessonId === lesson.id,
-                  completed: lesson.completed
+                  completed: isLessonCompleted(lesson.id)
                 }"
                 @click="selectLesson(lesson.id)"
               >
                 <div class="lesson-number">
-                  <span v-if="!lesson.completed">{{ index + 1 }}</span>
+                  <span v-if="!isLessonCompleted(lesson.id)">{{ index + 1 }}</span>
                   <i v-else class="fas fa-check"></i>
                 </div>
                 <div class="lesson-info">
-                  <h3>{{ lesson.title }}</h3>
-                  <p>{{ lesson.duration }} min</p>
+                  <h3>{{ lesson.Title }}</h3>
+                  <p>{{ lesson.Duration }} min</p>
                 </div>
                 <div class="lesson-status">
-                  <i v-if="lesson.completed" class="fas fa-check-circle"></i>
+                  <i v-if="isLessonCompleted(lesson.id)" class="fas fa-check-circle"></i>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Lesson content -->
           <div class="lesson-content-area">
             <div v-if="currentLesson" class="lesson-content">
               <div class="lesson-header">
-                <h2>{{ currentLesson.title }}</h2>
+                <h2>{{ currentLesson.Title }}</h2>
                 <span class="lesson-duration">
-                  <i class="fas fa-clock"></i> {{ currentLesson.duration }} min
+                  <i class="fas fa-clock"></i> {{ currentLesson.Duration }} min
                 </span>
               </div>
 
-              <div v-if="currentLesson.videoUrl" class="video-container">
+              <div v-if="currentLesson.video_url" class="video-container">
                 <div class="video-wrapper">
                   <iframe
                     width="100%"
                     height="500"
-                    :src="currentLesson.videoUrl"
+                    :src="currentLesson.video_url"
                     frameborder="0"
                     allowfullscreen
                   ></iframe>
                 </div>
               </div>
 
-              <div class="lesson-text" v-html="currentLesson.content"></div>
+              <div class="lesson-text" v-html="formatLessonContent(currentLesson.Description)"></div>
 
               <div class="lesson-actions">
                 <button
@@ -110,6 +106,9 @@
                 </button>
               </div>
             </div>
+            <div v-else class="no-lesson-selected">
+              <p>Please select a lesson from the sidebar</p>
+            </div>
           </div>
         </div>
       </div>
@@ -118,6 +117,8 @@
 </template>
 
 <script>
+import axios from 'axios';
+
 export default {
   layout: 'dashboard',
   data() {
@@ -128,167 +129,156 @@ export default {
         progress: 0
       },
       currentLessonId: null,
-      lessons: [
-        {
-          id: 1,
-          title: 'Introduction to Gardening Safety',
-          duration: 15,
-          content: `
-            <p>Welcome to the Home Gardening Safety course. Gardening is a rewarding activity, but it's important to be aware of potential hazards.</p>
-            <h3>Key Safety Principles:</h3>
-            <ul>
-              <li>Always wear appropriate protective gear</li>
-              <li>Be aware of your surroundings</li>
-              <li>Use tools properly</li>
-              <li>Stay hydrated and take breaks</li>
-            </ul>
-            <p>In this lesson, we'll cover the basics of creating a safe gardening environment.</p>
-          `,
-          videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-          completed: false
-        },
-        {
-          id: 2,
-          title: 'Identifying Garden Hazards',
-          duration: 20,
-          content: `
-            <p>Gardens contain many potential hazards that you should be aware of:</p>
-            <h3>Common Hazards:</h3>
-            <ul>
-              <li>Sharp tools and equipment</li>
-              <li>Poisonous plants</li>
-              <li>Uneven terrain</li>
-              <li>Sun exposure</li>
-              <li>Insect bites and stings</li>
-            </ul>
-            <p>We'll go through each of these in detail and discuss how to mitigate the risks.</p>
-          `,
-          videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-          completed: false
-        },
-        {
-          id: 3,
-          title: 'Proper Tool Usage',
-          duration: 25,
-          content: `
-            <p>Using garden tools properly is essential for both safety and effectiveness.</p>
-            <h3>Tool Safety Tips:</h3>
-            <ul>
-              <li>Keep tools clean and sharp</li>
-              <li>Store tools properly when not in use</li>
-              <li>Use the right tool for the job</li>
-              <li>Wear gloves when handling sharp tools</li>
-            </ul>
-            <p>This lesson includes demonstrations of proper tool techniques.</p>
-          `,
-          videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-          completed: false
-        }
-      ]
-    }
+      allLessons: [],
+      courseProgress: null,
+      currentUser: { id: 38, username: 'Abhishek10' } // Replace with your actual user management
+    };
   },
   computed: {
+    filteredLessons() {
+      return this.allLessons
+        .filter(lesson =>
+          lesson.Course && lesson.Course.some(c => c.id === this.course.id)
+        )
+        .sort((a, b) => (a.Order || 0) - (b.Order || 0));
+    },
     currentLesson() {
-      return this.lessons.find(l => l.id === this.currentLessonId)
+      return this.filteredLessons.find(l => l.id === this.currentLessonId);
     },
     hasPreviousLesson() {
-      const index = this.lessons.findIndex(l => l.id === this.currentLessonId)
-      return index > 0
+      const index = this.filteredLessons.findIndex(l => l.id === this.currentLessonId);
+      return index > 0;
     },
     isLastLesson() {
-      const index = this.lessons.findIndex(l => l.id === this.currentLessonId)
-      return index === this.lessons.length - 1
+      const index = this.filteredLessons.findIndex(l => l.id === this.currentLessonId);
+      return index === this.filteredLessons.length - 1;
     },
     completedLessons() {
-      return this.lessons.filter(l => l.completed).length
+      if (!this.courseProgress) return 0;
+      return this.courseProgress.lesson.length;
     },
     totalDuration() {
-      return this.lessons.reduce((total, lesson) => total + lesson.duration, 0)
+      return this.filteredLessons.reduce((total, lesson) =>
+        total + (lesson.Duration || 0), 0);
     }
   },
-  created() {
-    this.loadCourse()
+  async created() {
+    await this.loadCourseAndLessons();
+    await this.fetchCourseProgress();
   },
   methods: {
-    loadCourse() {
-      const courseId = this.$route.params.id
-      // Load from localStorage if available
-      const savedProgress = localStorage.getItem(`course-${courseId}-progress`)
-
-      if (savedProgress) {
-        const { course, lessons } = JSON.parse(savedProgress)
-        this.course = course
-        this.lessons = lessons
-        this.currentLessonId = lessons.find(l => !l.completed)?.id || lessons[0].id
-      } else {
-        this.course = {
-          id: courseId,
-          title: 'Home Gardening Safety',
-          progress: 0
+    formatLessonContent(content) {
+      return content ? content.replace(/```/g, '') : '';
+    },
+    isLessonCompleted(lessonId) {
+      if (!this.courseProgress) return false;
+      return this.courseProgress.lesson.some(l => l.id === lessonId);
+    },
+    async loadCourseAndLessons() {
+      const courseId = this.$route.params.id;
+      try {
+        // 1. Fetch course details
+        const courseRes = await axios.get(`http://localhost/api/teople1/courses/${courseId}/`);
+        if (courseRes.data.status === 'success') {
+          const c = courseRes.data.course;
+          this.course = {
+            id: c.id,
+            title: c.Title || 'Untitled Course',
+            progress: 0
+          };
         }
-        this.currentLessonId = this.lessons[0].id
+
+        // 2. Fetch all lessons
+        const lessonsRes = await axios.get('http://localhost/api/teople1/lessons/');
+        if (lessonsRes.data.status === 'success' && lessonsRes.data.lessons) {
+          this.allLessons = lessonsRes.data.lessons;
+
+          // Set first lesson for this course if none selected
+          const courseLessons = this.allLessons.filter(lesson =>
+            lesson.Course && lesson.Course.some(c => c.id === this.course.id)
+          );
+          if (courseLessons.length > 0) {
+            this.currentLessonId = courseLessons[0].id;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch course or lessons:', error);
       }
     },
-    selectLesson(lessonId) {
-      this.currentLessonId = lessonId
-    },
-    goToNextLesson() {
-      const index = this.lessons.findIndex(l => l.id === this.currentLessonId)
-      if (index < this.lessons.length - 1) {
-        this.currentLessonId = this.lessons[index + 1].id
-        this.markLessonCompleted(this.currentLessonId)
+    async fetchCourseProgress() {
+      try {
+        const response = await axios.get('http://localhost/api/teople1/progress/');
+        if (response.data.status === 'success') {
+          const progress = response.data.progress.find(p =>
+            p.user.some(u => u.id === this.currentUser.id) &&
+            p.course.some(c => c.id === this.course.id)
+          );
+          if (progress) {
+            this.courseProgress = progress;
+            if (progress.completed === 'yes') {
+              this.course.progress = 100;
+            } else {
+              const totalLessons = this.filteredLessons.length;
+              const completedCount = progress.lesson.length;
+              this.course.progress = Math.round((completedCount / totalLessons) * 100);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching progress:', error);
       }
     },
-    goToPreviousLesson() {
-      const index = this.lessons.findIndex(l => l.id === this.currentLessonId)
+    async selectLesson(lessonId) {
+      this.currentLessonId = lessonId;
+    },
+    async goToNextLesson() {
+      const index = this.filteredLessons.findIndex(l => l.id === this.currentLessonId);
+      if (index < this.filteredLessons.length - 1) {
+        this.currentLessonId = this.filteredLessons[index + 1].id;
+        await this.markLessonCompleted(this.currentLessonId);
+      }
+    },
+    async goToPreviousLesson() {
+      const index = this.filteredLessons.findIndex(l => l.id === this.currentLessonId);
       if (index > 0) {
-        this.currentLessonId = this.lessons[index - 1].id
+        this.currentLessonId = this.filteredLessons[index - 1].id;
       }
     },
-    markLessonCompleted(lessonId) {
-      const lesson = this.lessons.find(l => l.id === lessonId)
-      if (lesson && !lesson.completed) {
-        lesson.completed = true
-        this.updateCourseProgress()
-        this.saveProgress()
+    async markLessonCompleted(lessonId) {
+      try {
+        if (this.isLessonCompleted(lessonId)) return;
+        await axios.post('http://localhost/api/teople1/progress/', {
+          user: [{ id: this.currentUser.id, value: this.currentUser.username }],
+          course: [{ id: this.course.id, value: this.course.title }],
+          lesson: [{ id: lessonId, value: this.currentLesson.Title }],
+          completed: this.filteredLessons.length === this.completedLessons + 1 ? 'yes' : 'no',
+          last_accessed: new Date().toISOString()
+        });
+        await this.fetchCourseProgress();
+      } catch (error) {
+        console.error('Error marking lesson as completed:', error);
       }
     },
-    updateCourseProgress() {
-      const completedCount = this.lessons.filter(l => l.completed).length
-      this.course.progress = Math.round((completedCount / this.lessons.length) * 100)
-    },
-    saveProgress() {
-      localStorage.setItem(`course-${this.course.id}-progress`, JSON.stringify({
-        course: this.course,
-        lessons: this.lessons
-      }))
-    },
-    completeCourse() {
-  // 1. Mark the current lesson as completed
-  this.markLessonCompleted(this.currentLessonId);
-
-  // 2. Update course progress to 100%
-  this.course.progress = 100;
-  this.course.status = "Complete";
-
-  // 3. Save the updated progress to localStorage
-  this.saveProgress();
-
-  // 4. Show success notification
-  this.$notify({
-    title: 'Congratulations!',
-    message: 'You have successfully completed the course!',
-    type: 'success',
-    duration: 3000 // Show for 3 seconds
-  });
-
-  // 5. Redirect to the courses page after a short delay
-  setTimeout(() => {
-    this.$router.push('/course/courses');
-  }, 1000);
-}
+    async completeCourse() {
+      try {
+        await this.markLessonCompleted(this.currentLessonId);
+        await axios.post('http://localhost/api/teople1/progress/', {
+          user: [{ id: this.currentUser.id, value: this.currentUser.username }],
+          course: [{ id: this.course.id, value: this.course.title }],
+          completed: 'yes',
+          last_accessed: new Date().toISOString(),
+          score: 100
+        });
+        this.course.progress = 100;
+        alert('Congratulations! You have successfully completed the course.');
+        this.$router.push('/course/courses');
+      } catch (error) {
+        console.error('Error completing course:', error);
+        alert('Failed to complete course. Please try again.');
+      }
+    }
   }
-}
+};
 </script>
 
 <style scoped>

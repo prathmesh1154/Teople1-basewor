@@ -6,7 +6,10 @@ from baserow.contrib.database.table.models import Table
 from baserow.contrib.database.models import Database
 from django.core.exceptions import ObjectDoesNotExist
 from datetime import datetime ,timedelta
+from rest_framework.decorators import action
 from django.core.exceptions import ValidationError
+from baserow.contrib.database.fields.models import Field
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -891,290 +894,913 @@ class UserLogoutView(APIView):
 
 
 
-class BaseBaserowView(APIView):
-    """Base view for Baserow table operations"""
+class CoursesView(APIView):
+    permission_classes = (AllowAny,)
 
-    DATABASE_NAME = "prathmesh"
-
-    def get_model_and_table(self,cources):
-        """Helper method to get the model and table with error handling"""
+    def get_model_and_table(self, model_name="Courses"):
         try:
-            database = Database.objects.get(name=self.DATABASE_NAME)
-            table = Table.objects.get(database=database, name=cources)
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=model_name)
             model = table.get_model()
             return model, table
-        except Database.DoesNotExist:
-            logger.error(f"Database '{self.DATABASE_NAME}' not found")
-            raise ValueError(f"Database '{self.DATABASE_NAME}' not found")
-        except Table.DoesNotExist:
-            logger.error(f"Table '{cources}' not found")
-            raise ValueError(f"Table '{cources}' not found")
         except Exception as e:
-            logger.error(f"Error getting model and table: {str(e)}")
+            logger.error(f"Error getting model and table for {model_name}: {str(e)}")
             raise
 
-    def serialize_field_value(self, field_obj, field_value):
-        """Enhanced field value serialization with proper link row handling"""
-        if field_value is None:
-            return None
-
-        field_type = field_obj['type'].type
-
+    def get_relation_field_id(self, table_name, target_table="Courses"):
         try:
-            # Handle link row fields
-            if field_type == 'link_row':
-                target_table = getattr(field_obj['type'], 'get_target_table', lambda: None)()
-                if not target_table:
-                    target_table = getattr(field_obj['type'], 'link_row_table', None)
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=table_name)
 
-                if target_table:
-                    related_model = target_table.get_model()
-                    return {
-                        'ids': list(field_value.values_list('id', flat=True)),
-                        'objects': [
-                            {'id': obj.id, 'name': str(obj)}
-                            for obj in field_value.all()[:100]  # Limit to 100
-                        ]
-                    }
-                return []
+            link_fields = table.field_set.filter(type='link_row')
 
-            # Handle other field types
-            if field_type == 'number':
-                return float(field_value) if field_value is not None else None
-            elif field_type == 'boolean':
-                return bool(field_value)
-            elif field_type in ['last_modified', 'created_on', 'date']:
-                return field_value.isoformat() if hasattr(field_value, 'isoformat') else str(field_value)
-            elif field_type == 'multiple_select':
-                if isinstance(field_value, list):
-                    return [str(v) for v in field_value]
-                return [str(field_value)] if field_value else []
-            elif field_type == 'single_select':
-                if field_value and hasattr(field_value, 'value'):
-                    return field_value.value
-                return str(field_value) if field_value else None
+            # First try exact matches where link_row_table is target_table
+            for field in link_fields:
+                if field.link_row_table.name == target_table:
+                    return f'field_{field.id}'
 
-            return field_value
+            # Fallback: try common field names
+            common_names = ['course', 'parent_course', 'related_course', 'course_link']
+            for name in common_names:
+                try:
+                    field = table.field_set.get(name=name, type='link_row')
+                    if field.link_row_table.name == target_table:
+                        return f'field_{field.id}'
+                except Exception:
+                    continue
+
+            # Last fallback: return first link field linking to target_table if any
+            for field in link_fields:
+                if field.link_row_table.name == target_table:
+                    return f'field_{field.id}'
+
+            logger.error(f"No link_row field found in {table_name} linking to {target_table}")
+            return None
 
         except Exception as e:
-            logger.error(f"Error serializing field {field_obj['field'].name}: {str(e)}")
+            logger.error(f"Error finding relation field in {table_name}: {str(e)}")
             return None
 
-    def get_object_data(self, obj):
-        """Enhanced object data serialization with proper field handling"""
+    def get_course_data(self, course):
         try:
-            field_objects = obj.get_field_objects()
-            obj_data = {
-                'id': obj.id,
-                'created_on': obj.created_on.isoformat() if obj.created_on else None,
-                'updated_on': obj.updated_on.isoformat() if obj.updated_on else None
+            field_objects = course.get_field_objects()
+            course_data = {
+                'id': course.id,
+                'order': str(course.order) if hasattr(course, 'order') else None,
+                'created_on': course.created_on.isoformat() if course.created_on else None,
+                'updated_on': course.updated_on.isoformat() if course.updated_on else None
             }
 
-            for field_obj in field_objects:
-                field_name = field_obj['field'].name
-                field_value = getattr(obj, f'field_{field_obj["field"].id}')
-                obj_data[field_name] = self.serialize_field_value(field_obj, field_value)
+            for field_object in field_objects:
+                field_name = field_object['field'].name
+                try:
+                    field_value = getattr(course, f'field_{field_object["field"].id}')
+                    course_data[field_name] = self.convert_field_value(
+                        field_value,
+                        field_object['type'].type
+                    )
+                except Exception as e:
+                    logger.warning(f"Couldn't get field {field_name} value: {str(e)}")
+                    course_data[field_name] = None
 
-            return obj_data
-
+            return course_data
         except Exception as e:
-            logger.error(f"Error serializing object data: {str(e)}")
-            raise ValueError(f"Error serializing object: {str(e)}")
+            logger.error(f"Error formatting course data: {str(e)}")
+            raise
 
+    def convert_field_value(self, value, field_type):
+        if value is None:
+            return None
 
-class CourseView(BaseBaserowView):
-    permission_classes = (AllowAny,)
+        if field_type == 'number':
+            return float(value)
+        elif field_type == 'boolean':
+            return bool(value)
+        elif field_type in ['date', 'last_modified', 'created_on']:
+            return value.isoformat() if hasattr(value, 'isoformat') else str(value)
+        elif field_type == 'link_row':
+            if hasattr(value, 'all'):
+                return [{'id': obj.id, 'value': str(obj)} for obj in value.all()]
+            elif hasattr(value, 'id'):
+                return {'id': value.id, 'value': str(value)}
+            return None
+        else:
+            return value
 
     def get(self, request, course_id=None):
         try:
-            model, _ = self.get_model_and_table("Courses")
-
+            model, _ = self.get_model_and_table()
             if course_id:
                 course = model.objects.get(id=course_id)
-                return Response({
-                    "status": "success",
-                    "course": self.get_object_data(course)
-                })
+                course_data = self.get_course_data(course)
+                return Response({"status": "success", "course": course_data})
 
             courses = model.objects.all()
-            courses_data = [self.get_object_data(course) for course in courses]
-
             return Response({
                 "status": "success",
-                "count": len(courses_data),
-                "courses": courses_data
+                "count": courses.count(),
+                "courses": [self.get_course_data(course) for course in courses]
             })
-
-        except ObjectDoesNotExist:
-            return Response({"status": "error", "message": "Course not found"}, status=404)
-        except ValueError as e:
-            return Response({"status": "error", "message": str(e)}, status=400)
+        except model.DoesNotExist:
+            return Response({"error": "Course not found"}, status=404)
         except Exception as e:
-            logger.error(f"Error in GET request: {str(e)}")
-            return Response({"status": "error", "message": str(e)}, status=500)
+            logger.error(f"Error in CoursesView GET: {str(e)}")
+            return Response({"error": str(e)}, status=500)
+
+    def post(self, request):
+        try:
+            model, _ = self.get_model_and_table()
+            data = request.data
+
+            field_objects = {fo['field'].name: fo for fo in model.get_field_objects()}
+            course_data = {}
+
+            for field_name, value in data.items():
+                if field_name in field_objects:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    course_data[f'field_{field_id}'] = self.convert_field_value(value, field_type)
+
+            course = model.objects.create(**course_data)
+            return Response({
+                "status": "success",
+                "message": "Course created successfully",
+                "course": self.get_course_data(course)
+            }, status=201)
+        except Exception as e:
+            logger.error(f"Error creating course: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+    def put(self, request, course_id):
+        try:
+            model, _ = self.get_model_and_table()
+            course = model.objects.get(id=course_id)
+            data = request.data
+
+            field_objects = {fo['field'].name: fo for fo in model.get_field_objects()}
+
+            for field_name, value in data.items():
+                if field_name in field_objects:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    setattr(course, f'field_{field_id}', self.convert_field_value(value, field_type))
+
+            course.save()
+            return Response({
+                "status": "success",
+                "message": "Course updated successfully",
+                "course": self.get_course_data(course)
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Course not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error updating course: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+    def delete(self, request, course_id):
+        try:
+            model, _ = self.get_model_and_table()
+            course = model.objects.get(id=course_id)
+            course.delete()
+            return Response({
+                "status": "success",
+                "message": "Course deleted successfully"
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Course not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error deleting course: {str(e)}")
+            return Response({"error": str(e)}, status=400)
 
 
-class LessonView(BaseBaserowView):
+class LessonsView(APIView):
     permission_classes = (AllowAny,)
 
-    def get(self, request, course_id=None, lesson_id=None):
+    def get_model_and_table(self, model_name="Lessons"):
         try:
-            model, _ = self.get_model_and_table("Lessons")
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=model_name)
+            model = table.get_model()
+            return model, table
+        except Exception as e:
+            logger.error(f"Error getting model and table for {model_name}: {str(e)}")
+            raise
 
+    def get_relation_field_id(self, table_name, target_table="Lessons"):
+        try:
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=table_name)
+
+            link_fields = table.field_set.filter(type='link_row')
+
+            # First try exact matches where link_row_table is target_table
+            for field in link_fields:
+                if field.link_row_table.name == target_table:
+                    return f'field_{field.id}'
+
+            # Fallback: try common field names
+            common_names = ['lesson', 'parent_lesson', 'related_lesson', 'lesson_link']
+            for name in common_names:
+                try:
+                    field = table.field_set.get(name=name, type='link_row')
+                    if field.link_row_table.name == target_table:
+                        return f'field_{field.id}'
+                except Exception:
+                    continue
+
+            # Last fallback: return first link field linking to target_table if any
+            for field in link_fields:
+                if field.link_row_table.name == target_table:
+                    return f'field_{field.id}'
+
+            logger.error(f"No link_row field found in {table_name} linking to {target_table}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error finding relation field in {table_name}: {str(e)}")
+            return None
+
+    def get_lesson_data(self, lesson):
+        try:
+            field_objects = lesson.get_field_objects()
+            lesson_data = {
+                'id': lesson.id,
+                'order': str(lesson.order) if hasattr(lesson, 'order') else None,
+                'created_on': lesson.created_on.isoformat() if lesson.created_on else None,
+                'updated_on': lesson.updated_on.isoformat() if lesson.updated_on else None
+            }
+
+            for field_object in field_objects:
+                field_name = field_object['field'].name
+                try:
+                    field_value = getattr(lesson, f'field_{field_object["field"].id}')
+                    lesson_data[field_name] = self.convert_field_value(
+                        field_value,
+                        field_object['type'].type
+                    )
+                except Exception as e:
+                    logger.warning(f"Couldn't get field {field_name} value: {str(e)}")
+                    lesson_data[field_name] = None
+
+            return lesson_data
+        except Exception as e:
+            logger.error(f"Error formatting lesson data: {str(e)}")
+            raise
+
+    def convert_field_value(self, value, field_type):
+        if value is None:
+            return None
+
+        if field_type == 'number':
+            return float(value)
+        elif field_type == 'boolean':
+            return bool(value)
+        elif field_type in ['date', 'last_modified', 'created_on']:
+            return value.isoformat() if hasattr(value, 'isoformat') else str(value)
+        elif field_type == 'link_row':
+            if hasattr(value, 'all'):
+                return [{'id': obj.id, 'value': str(obj)} for obj in value.all()]
+            elif hasattr(value, 'id'):
+                return {'id': value.id, 'value': str(value)}
+            return None
+        else:
+            return value
+
+    def get(self, request, lesson_id=None):
+        try:
+            model, _ = self.get_model_and_table()
             if lesson_id:
                 lesson = model.objects.get(id=lesson_id)
-                return Response({
-                    "status": "success",
-                    "lesson": self.get_object_data(lesson)
-                })
+                lesson_data = self.get_lesson_data(lesson)
+                return Response({"status": "success", "lesson": lesson_data})
 
-            # Filter lessons by course if course_id provided
-            if course_id:
-                lessons = model.objects.filter(field_1=[course_id])  # field_1 should be the link to Courses
-            else:
-                lessons = model.objects.all()
-
-            lessons_data = [self.get_object_data(lesson) for lesson in lessons]
-
+            lessons = model.objects.all()
             return Response({
                 "status": "success",
-                "count": len(lessons_data),
-                "lessons": lessons_data
+                "count": lessons.count(),
+                "lessons": [self.get_lesson_data(lesson) for lesson in lessons]
             })
-
-        except ObjectDoesNotExist:
-            return Response({"status": "error", "message": "Lesson not found"}, status=404)
-        except ValueError as e:
-            return Response({"status": "error", "message": str(e)}, status=400)
+        except model.DoesNotExist:
+            return Response({"error": "Lesson not found"}, status=404)
         except Exception as e:
-            logger.error(f"Error in GET request: {str(e)}")
-            return Response({"status": "error", "message": str(e)}, status=500)
+            logger.error(f"Error in LessonsView GET: {str(e)}")
+            return Response({"error": str(e)}, status=500)
+
+    def post(self, request):
+        try:
+            model, _ = self.get_model_and_table()
+            data = request.data
+
+            field_objects = {fo['field'].name: fo for fo in model.get_field_objects()}
+            lesson_data = {}
+
+            for field_name, value in data.items():
+                if field_name in field_objects:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    lesson_data[f'field_{field_id}'] = self.convert_field_value(value, field_type)
+
+            lesson = model.objects.create(**lesson_data)
+            return Response({
+                "status": "success",
+                "message": "Lesson created successfully",
+                "lesson": self.get_lesson_data(lesson)
+            }, status=201)
+        except Exception as e:
+            logger.error(f"Error creating lesson: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+    def put(self, request, lesson_id):
+        try:
+            model, _ = self.get_model_and_table()
+            lesson = model.objects.get(id=lesson_id)
+            data = request.data
+
+            field_objects = {fo['field'].name: fo for fo in model.get_field_objects()}
+
+            for field_name, value in data.items():
+                if field_name in field_objects:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    setattr(lesson, f'field_{field_id}', self.convert_field_value(value, field_type))
+
+            lesson.save()
+            return Response({
+                "status": "success",
+                "message": "Lesson updated successfully",
+                "lesson": self.get_lesson_data(lesson)
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Lesson not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error updating lesson: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+    def delete(self, request, lesson_id):
+        try:
+            model, _ = self.get_model_and_table()
+            lesson = model.objects.get(id=lesson_id)
+            lesson.delete()
+            return Response({
+                "status": "success",
+                "message": "Lesson deleted successfully"
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Lesson not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error deleting lesson: {str(e)}")
+            return Response({"error": str(e)}, status=400)
 
 
-class EnrollmentView(BaseBaserowView):
+class EnrollmentsView(APIView):
     permission_classes = (AllowAny,)
 
-    def post(self, request, course_id):
+    def get_model_and_table(self, model_name="Enrollments"):
         try:
-            # Get the Courses and Enrollments tables
-            course_model, _ = self.get_model_and_table("Courses")
-            enrollment_model, _ = self.get_model_and_table("Enrollments")
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=model_name)
+            model = table.get_model()
+            return model, table
+        except Database.DoesNotExist:
+            logger.error("Database 'prathmesh' not found")
+            raise
+        except Table.DoesNotExist:
+            logger.error(f"Table '{model_name}' not found in database")
+            raise
+        except Exception as e:
+            logger.error(f"Error getting model and table for {model_name}: {str(e)}")
+            raise
 
-            # Check if course exists
-            course = course_model.objects.get(id=course_id)
+    def ensure_relationships(self):
+        """Ensure required relationships exist in Enrollments table"""
+        try:
+            with transaction.atomic():
+                database = Database.objects.get(name="prathmesh")
+                enrollments_table = Table.objects.get(database=database, name="Enrollments")
+                courses_table = Table.objects.get(database=database, name="Courses")
+                users_table = Table.objects.get(database=database, name="Users")
 
-            # Check if user is already enrolled
-            existing_enrollment = enrollment_model.objects.filter(
-                field_1=request.user.id,  # field_1 should be link to Users
-                field_2=course_id  # field_2 should be link to Courses
-            ).first()
+                # Check/Create course relationship
+                course_field = enrollments_table.field_set.filter(
+                    type='link_row',
+                    link_row_table=courses_table
+                ).first()
+                if not course_field:
+                    course_field = Field.objects.create(
+                        table=enrollments_table,
+                        name="course",
+                        type="link_row",
+                        link_row_table=courses_table,
+                        order=0
+                    )
+                    logger.info(f"Created course link in Enrollments table (ID: {course_field.id})")
 
-            if existing_enrollment:
-                return Response({
-                    "status": "success",
-                    "message": "Already enrolled",
-                    "enrollment": self.get_object_data(existing_enrollment)
-                }, status=200)
+                # Check/Create user relationship
+                user_field = enrollments_table.field_set.filter(
+                    type='link_row',
+                    link_row_table=users_table
+                ).first()
+                if not user_field:
+                    user_field = Field.objects.create(
+                        table=enrollments_table,
+                        name="user",
+                        type="link_row",
+                        link_row_table=users_table,
+                        order=1
+                    )
+                    logger.info(f"Created user link in Enrollments table (ID: {user_field.id})")
 
-            # Create new enrollment
+                return (
+                    f'field_{course_field.id}',
+                    f'field_{user_field.id}'
+                )
+        except Exception as e:
+            logger.error(f"Error ensuring relationships: {str(e)}")
+            return None, None
+
+    def get_relation_field_id(self, table_name, target_table):
+        try:
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=table_name)
+
+            link_fields = table.field_set.filter(type='link_row')
+
+            # First try exact matches where link_row_table is target_table
+            for field in link_fields:
+                if field.link_row_table.name == target_table:
+                    return f'field_{field.id}'
+
+            # Fallback: try common field names based on target table
+            common_names = {
+                "Courses": ['course', 'parent_course', 'related_course', 'course_link'],
+                "Users": ['user', 'student', 'learner', 'participant']
+            }.get(target_table, [])
+
+            for name in common_names:
+                try:
+                    field = table.field_set.get(name=name, type='link_row')
+                    if field.link_row_table.name == target_table:
+                        return f'field_{field.id}'
+                except Exception:
+                    continue
+
+            # If not found, try to create the relationship
+            if target_table == "Courses":
+                return self.ensure_relationships()[0]
+            elif target_table == "Users":
+                return self.ensure_relationships()[1]
+
+            logger.error(f"No link_row field found in {table_name} linking to {target_table}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error finding relation field in {table_name}: {str(e)}")
+            return None
+
+    def get_enrollment_data(self, enrollment):
+        try:
+            field_objects = enrollment.get_field_objects()
             enrollment_data = {
-                'field_1': [request.user.id],  # User
-                'field_2': [course_id],  # Course
-                'field_3': 0,  # Progress
-                'field_4': False,  # Completed
-                'field_5': datetime.now().isoformat()  # Enrolled date
+                'id': enrollment.id,
+                'order': str(enrollment.order) if hasattr(enrollment, 'order') else None,
+                'created_on': enrollment.created_on.isoformat() if enrollment.created_on else None,
+                'updated_on': enrollment.updated_on.isoformat() if enrollment.updated_on else None
             }
 
-            enrollment = enrollment_model.objects.create(**enrollment_data)
+            for field_object in field_objects:
+                field_name = field_object['field'].name
+                try:
+                    field_value = getattr(enrollment, f'field_{field_object["field"].id}')
+                    enrollment_data[field_name] = self.convert_field_value(
+                        field_value,
+                        field_object['type'].type
+                    )
+                except Exception as e:
+                    logger.warning(f"Couldn't get field {field_name} value: {str(e)}")
+                    enrollment_data[field_name] = None
+
+            return enrollment_data
+        except Exception as e:
+            logger.error(f"Error formatting enrollment data: {str(e)}")
+            raise
+
+    def convert_field_value(self, value, field_type):
+        if value is None:
+            return None
+
+        if field_type == 'number':
+            return float(value)
+        elif field_type == 'boolean':
+            return bool(value)
+        elif field_type in ['date', 'last_modified', 'created_on']:
+            return value.isoformat() if hasattr(value, 'isoformat') else str(value)
+        elif field_type == 'link_row':
+            if hasattr(value, 'all'):
+                return [{'id': obj.id, 'value': str(obj)} for obj in value.all()]
+            elif hasattr(value, 'id'):
+                return {'id': value.id, 'value': str(value)}
+            return None
+        else:
+            return value
+
+    def get(self, request, enrollment_id=None):
+        try:
+            model, _ = self.get_model_and_table()
+
+            if enrollment_id:
+                enrollment = model.objects.get(id=enrollment_id)
+                enrollment_data = self.get_enrollment_data(enrollment)
+                return Response({"status": "success", "enrollment": enrollment_data})
+
+            # Filter by course if course_id provided in query params
+            course_id = request.query_params.get('course_id')
+            user_id = request.query_params.get('user_id')
+
+            filters = {}
+            if course_id:
+                course_field_id = self.get_relation_field_id("Enrollments", "Courses")
+                if course_field_id:
+                    filters[course_field_id] = course_id
+                else:
+                    return Response({
+                        "error": "Course relationship not found in Enrollments table",
+                        "solution": "Please ensure Enrollments table has a link to Courses table"
+                    }, status=400)
+
+            if user_id:
+                user_field_id = self.get_relation_field_id("Enrollments", "Users")
+                if user_field_id:
+                    filters[user_field_id] = user_id
+                else:
+                    return Response({
+                        "error": "User relationship not found in Enrollments table",
+                        "solution": "Please ensure Enrollments table has a link to Users table"
+                    }, status=400)
+
+            enrollments = model.objects.filter(**filters) if filters else model.objects.all()
 
             return Response({
                 "status": "success",
-                "message": "Enrolled successfully",
-                "enrollment": self.get_object_data(enrollment)
-            }, status=201)
-
-        except ObjectDoesNotExist:
-            return Response({"status": "error", "message": "Course not found"}, status=404)
+                "count": enrollments.count(),
+                "enrollments": [self.get_enrollment_data(enrollment) for enrollment in enrollments]
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Enrollment not found"}, status=404)
         except Exception as e:
-            logger.error(f"Error enrolling: {str(e)}")
-            return Response({"status": "error", "message": str(e)}, status=500)
+            logger.error(f"Error in EnrollmentsView GET: {str(e)}")
+            return Response({"error": str(e)}, status=500)
 
-
-class UserProgressView(BaseBaserowView):
-    permission_classes = (AllowAny,)
-
-    def post(self, request, lesson_id):
+    def post(self, request):
         try:
-            # Get the Lessons and UserProgress tables
-            lesson_model, _ = self.get_model_and_table("Lessons")
-            progress_model, _ = self.get_model_and_table("UserProgress")
+            model, table = self.get_model_and_table()
+            data = request.data
 
-            # Check if lesson exists and get course
-            lesson = lesson_model.objects.get(id=lesson_id)
-            course_id = lesson.field_1[0]  # Assuming field_1 links to Courses
+            # Ensure required fields exist or create them
+            course_field_id, user_field_id = self.ensure_relationships()
 
-            # Check if user is enrolled in the course
-            enrollment_model, _ = self.get_model_and_table("Enrollments")
-            enrollment = enrollment_model.objects.filter(
-                field_1=request.user.id,
-                field_2=course_id
-            ).first()
-
-            if not enrollment:
+            if not course_field_id or not user_field_id:
                 return Response({
-                    "status": "error",
-                    "message": "Not enrolled in this course"
-                }, status=403)
+                    "error": "Missing required relationships in Enrollments table",
+                    "solution": "Please ensure Enrollments table has links to both Courses and Users"
+                }, status=400)
 
-            # Check if progress already exists
-            existing_progress = progress_model.objects.filter(
-                field_1=request.user.id,  # User
-                field_2=lesson_id  # Lesson
-            ).first()
+            # Check for required data
+            if 'course' not in data or 'user' not in data:
+                return Response({"error": "Both course and user IDs are required"}, status=400)
 
-            if existing_progress:
-                return Response({
-                    "status": "success",
-                    "message": "Already completed",
-                    "progress": self.get_object_data(existing_progress)
-                }, status=200)
+            # Check for existing enrollment
+            existing = model.objects.filter(
+                **{course_field_id: data['course'], user_field_id: data['user']}
+            ).exists()
+            if existing:
+                return Response({"error": "User already enrolled in this course"}, status=400)
 
-            # Create new progress record
-            progress_data = {
-                'field_1': [request.user.id],  # User
-                'field_2': [lesson_id],  # Lesson
-                'field_3': True,  # Completed
-                'field_4': datetime.now().isoformat()  # Completed date
+            field_objects = {fo['field'].name: fo for fo in table.get_field_objects()}
+            enrollment_data = {
+                course_field_id: data['course'],
+                user_field_id: data['user']
             }
 
-            progress = progress_model.objects.create(**progress_data)
+            for field_name, value in data.items():
+                if field_name in field_objects and field_name not in ['course', 'user']:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    enrollment_data[f'field_{field_id}'] = self.convert_field_value(value, field_type)
 
-            # Update enrollment progress
-            total_lessons = lesson_model.objects.filter(field_1=course_id).count()
-            completed_lessons = progress_model.objects.filter(
-                field_1=request.user.id,
-                field_2__in=[l.id for l in lesson_model.objects.filter(field_1=course_id)]
-            ).count()
+            enrollment = model.objects.create(**enrollment_data)
+            return Response({
+                "status": "success",
+                "message": "Enrollment created successfully",
+                "enrollment": self.get_enrollment_data(enrollment)
+            }, status=201)
+        except Exception as e:
+            logger.error(f"Error creating enrollment: {str(e)}")
+            return Response({"error": str(e)}, status=400)
 
-            new_progress = int((completed_lessons / total_lessons) * 100)
-            enrollment.field_3 = new_progress  # Progress field
+    def put(self, request, enrollment_id):
+        try:
+            model, table = self.get_model_and_table()
+            enrollment = model.objects.get(id=enrollment_id)
+            data = request.data
 
-            if new_progress == 100:
-                enrollment.field_4 = True  # Completed field
+            field_objects = {fo['field'].name: fo for fo in table.get_field_objects()}
+
+            for field_name, value in data.items():
+                if field_name in field_objects:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    setattr(enrollment, f'field_{field_id}', self.convert_field_value(value, field_type))
 
             enrollment.save()
+            return Response({
+                "status": "success",
+                "message": "Enrollment updated successfully",
+                "enrollment": self.get_enrollment_data(enrollment)
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Enrollment not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error updating enrollment: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+    def delete(self, request, enrollment_id):
+        try:
+            model, _ = self.get_model_and_table()
+            enrollment = model.objects.get(id=enrollment_id)
+            enrollment.delete()
+            return Response({
+                "status": "success",
+                "message": "Enrollment deleted successfully"
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Enrollment not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error deleting enrollment: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+
+class ProgressView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get_model_and_table(self, model_name="Progress"):
+        try:
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=model_name)
+            model = table.get_model()
+            return model, table
+        except Exception as e:
+            logger.error(f"Error getting model and table for {model_name}: {str(e)}")
+            raise
+
+    def get_relation_field_id(self, table_name, target_table):
+        try:
+            database = Database.objects.get(name="prathmesh")
+            table = Table.objects.get(database=database, name=table_name)
+
+            link_fields = table.field_set.filter(type='link_row')
+
+            # First try exact matches where link_row_table is target_table
+            for field in link_fields:
+                if field.link_row_table.name == target_table:
+                    return f'field_{field.id}'
+
+            # Fallback: try common field names based on target table
+            common_names = {
+                "Courses": ['course', 'parent_course', 'related_course'],
+                "Users": ['user', 'student', 'learner'],
+                "Lessons": ['lesson', 'module', 'content']
+            }.get(target_table, [])
+
+            for name in common_names:
+                try:
+                    field = table.field_set.get(name=name, type='link_row')
+                    if field.link_row_table.name == target_table:
+                        return f'field_{field.id}'
+                except Exception:
+                    continue
+
+            logger.error(f"No link_row field found in {table_name} linking to {target_table}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error finding relation field in {table_name}: {str(e)}")
+            return None
+
+    def get_progress_data(self, progress):
+        try:
+            field_objects = progress.get_field_objects()
+            progress_data = {
+                'id': progress.id,
+                'order': str(progress.order) if hasattr(progress, 'order') else None,
+                'created_on': progress.created_on.isoformat() if progress.created_on else None,
+                'updated_on': progress.updated_on.isoformat() if progress.updated_on else None
+            }
+
+            for field_object in field_objects:
+                field_name = field_object['field'].name
+                try:
+                    field_value = getattr(progress, f'field_{field_object["field"].id}')
+                    progress_data[field_name] = self.convert_field_value(
+                        field_value,
+                        field_object['type'].type
+                    )
+                except Exception as e:
+                    logger.warning(f"Couldn't get field {field_name} value: {str(e)}")
+                    progress_data[field_name] = None
+
+            return progress_data
+        except Exception as e:
+            logger.error(f"Error formatting progress data: {str(e)}")
+            raise
+
+    def convert_field_value(self, value, field_type):
+        if value is None:
+            return None
+
+        if field_type == 'number':
+            return float(value)
+        elif field_type == 'boolean':
+            return bool(value)
+        elif field_type in ['date', 'last_modified', 'created_on']:
+            return value.isoformat() if hasattr(value, 'isoformat') else str(value)
+        elif field_type == 'link_row':
+            if hasattr(value, 'all'):
+                return [{'id': obj.id, 'value': str(obj)} for obj in value.all()]
+            elif hasattr(value, 'id'):
+                return {'id': value.id, 'value': str(value)}
+            return None
+        else:
+            return value
+
+    def get(self, request, progress_id=None):
+        try:
+            model, _ = self.get_model_and_table()
+
+            if progress_id:
+                progress = model.objects.get(id=progress_id)
+                progress_data = self.get_progress_data(progress)
+                return Response({"status": "success", "progress": progress_data})
+
+            # Filter by course, user, or lesson if provided in query params
+            course_id = request.query_params.get('course_id')
+            user_id = request.query_params.get('user_id')
+            lesson_id = request.query_params.get('lesson_id')
+
+            filters = {}
+            if course_id:
+                course_field_id = self.get_relation_field_id("Progress", "Courses")
+                if course_field_id:
+                    filters[course_field_id] = course_id
+            if user_id:
+                user_field_id = self.get_relation_field_id("Progress", "Users")
+                if user_field_id:
+                    filters[user_field_id] = user_id
+            if lesson_id:
+                lesson_field_id = self.get_relation_field_id("Progress", "Lessons")
+                if lesson_field_id:
+                    filters[lesson_field_id] = lesson_id
+
+            progress_records = model.objects.filter(**filters) if filters else model.objects.all()
+
+            # Calculate completion stats if course_id and user_id are provided
+            if course_id and user_id:
+                lesson_model, _ = self.get_model_and_table("Lessons")
+                lesson_course_field_id = self.get_relation_field_id("Lessons", "Courses")
+
+                if lesson_course_field_id:
+                    total_lessons = lesson_model.objects.filter(**{lesson_course_field_id: course_id}).count()
+                    completed_lessons = progress_records.filter(field_completed=True).count()
+
+                    return Response({
+                        "status": "success",
+                        "count": progress_records.count(),
+                        "progress": [self.get_progress_data(record) for record in progress_records],
+                        "stats": {
+                            "total_lessons": total_lessons,
+                            "completed_lessons": completed_lessons,
+                            "completion_percentage": round(
+                                (completed_lessons / total_lessons * 100) if total_lessons > 0 else 0, 2)
+                        }
+                    })
 
             return Response({
                 "status": "success",
-                "message": "Progress updated",
-                "progress": self.get_object_data(progress),
-                "course_progress": new_progress
-            }, status=201)
+                "count": progress_records.count(),
+                "progress": [self.get_progress_data(record) for record in progress_records]
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Progress record not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error in ProgressView GET: {str(e)}")
+            return Response({"error": str(e)}, status=500)
 
-        except ObjectDoesNotExist:
-            return Response({"status": "error", "message": "Lesson not found"}, status=404)
+    def post(self, request):
+        try:
+            model, table = self.get_model_and_table()
+            data = request.data
+
+            # Ensure required fields exist
+            course_field_id = self.get_relation_field_id("Progress", "Courses")
+            user_field_id = self.get_relation_field_id("Progress", "Users")
+            lesson_field_id = self.get_relation_field_id("Progress", "Lessons")
+
+            if not all([course_field_id, user_field_id, lesson_field_id]):
+                return Response({
+                    "error": "Missing required relationships in Progress table",
+                    "solution": "Please ensure Progress table has links to Courses, Users, and Lessons"
+                }, status=400)
+
+            # Check for required data
+            required_fields = ['course', 'user', 'lesson']
+            if not all(field in data for field in required_fields):
+                return Response({"error": f"Required fields: {', '.join(required_fields)}"}, status=400)
+
+            # Verify lesson belongs to course
+            lesson_model, _ = self.get_model_and_table("Lessons")
+            lesson_course_field_id = self.get_relation_field_id("Lessons", "Courses")
+
+            if lesson_course_field_id:
+                try:
+                    lesson = lesson_model.objects.get(id=data['lesson'])
+                    if getattr(lesson, lesson_course_field_id) != data['course']:
+                        return Response({"error": "Lesson does not belong to specified course"}, status=400)
+                except lesson_model.DoesNotExist:
+                    return Response({"error": "Lesson not found"}, status=404)
+
+            field_objects = {fo['field'].name: fo for fo in table.get_field_objects()}
+            progress_data = {
+                course_field_id: data['course'],
+                user_field_id: data['user'],
+                lesson_field_id: data['lesson'],
+                'field_completed': data.get('completed', False),
+                'field_last_accessed': datetime.now().isoformat()
+            }
+
+            for field_name, value in data.items():
+                if field_name in field_objects and field_name not in required_fields:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    progress_data[f'field_{field_id}'] = self.convert_field_value(value, field_type)
+
+            progress = model.objects.create(**progress_data)
+            return Response({
+                "status": "success",
+                "message": "Progress created successfully",
+                "progress": self.get_progress_data(progress)
+            }, status=201)
+        except Exception as e:
+            logger.error(f"Error creating progress: {str(e)}")
+            return Response({"error": str(e)}, status=400)
+
+    def put(self, request, progress_id):
+        try:
+            model, table = self.get_model_and_table()
+            progress = model.objects.get(id=progress_id)
+            data = request.data
+
+            field_objects = {fo['field'].name: fo for fo in table.get_field_objects()}
+
+            for field_name, value in data.items():
+                if field_name in field_objects:
+                    field_obj = field_objects[field_name]
+                    field_id = field_obj['field'].id
+                    field_type = field_obj['type'].type
+                    setattr(progress, f'field_{field_id}', self.convert_field_value(value, field_type))
+
+            if 'completed' in data:
+                progress.field_completed = data['completed']
+            progress.field_last_accessed = datetime.now().isoformat()
+
+            progress.save()
+            return Response({
+                "status": "success",
+                "message": "Progress updated successfully",
+                "progress": self.get_progress_data(progress)
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Progress record not found"}, status=404)
         except Exception as e:
             logger.error(f"Error updating progress: {str(e)}")
-            return Response({"status": "error", "message": str(e)}, status=500)
+            return Response({"error": str(e)}, status=400)
 
-
+    def delete(self, request, progress_id):
+        try:
+            model, _ = self.get_model_and_table()
+            progress = model.objects.get(id=progress_id)
+            progress.delete()
+            return Response({
+                "status": "success",
+                "message": "Progress record deleted successfully"
+            })
+        except model.DoesNotExist:
+            return Response({"error": "Progress record not found"}, status=404)
+        except Exception as e:
+            logger.error(f"Error deleting progress: {str(e)}")
+            return Response({"error": str(e)}, status=400)
