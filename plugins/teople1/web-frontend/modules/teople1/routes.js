@@ -55,4 +55,10 @@ export const routes = [
     component: path.resolve(__dirname, 'pages/course/CourseLearnPage.vue'),
     props: true,
   },
+  {
+  name: 'course-quiz',
+  path: '/course/courses/:id/quiz',
+  component: path.resolve(__dirname, 'pages/course/CourseQuiz.vue'),
+  props: true,
+},
 ]

@@ -23,6 +23,9 @@
           <img :src="course.image" :alt="course.title" class="course-image" />
           <span class="course-status" :class="statusClass(course.status)">
             {{ course.status }}
+            <span v-if="course.hasQuiz && course.status === 'Completed'" class="quiz-badge">
+              <i class="fas fa-question-circle"></i>
+            </span>
           </span>
           <div class="course-category">{{ course.category }}</div>
         </div>
@@ -56,6 +59,9 @@
             @click.stop="handleCourseAction(course)"
           >
             {{ getButtonText(course) }}
+            <span v-if="course.hasQuiz && course.status === 'Completed'" class="quiz-indicator">
+              <i class="fas fa-question-circle"></i>
+            </span>
           </button>
         </div>
       </div>
@@ -83,96 +89,227 @@ export default {
       courses: [],
       filteredCourses: [],
       selectedCourseId: null,
-      isLoggedIn: false,
       searchQuery: '',
       filterStatus: 'all',
+      quizzes: []
     };
   },
-  created() {
-    this.fetchCourses()
+  async created() {
+    await this.fetchCourses();
+    await this.fetchQuizzes();
   },
   methods: {
-    async fetchProgress() {
-      try {
-        const res = await axios.get('http://localhost/api/teople1/progress/')
-        if (res.data.status === 'success') {
-          return res.data.progress || []
-        }
-        return []
-      } catch (err) {
-        console.error('Error fetching progress:', err)
-        return []
-      }
-    },
     async fetchCourses() {
       try {
-        const courseRes = await axios.get('http://localhost/api/teople1/courses/')
-        const progressList = await this.fetchProgress()
+        const [courseRes, progressRes] = await Promise.all([
+          axios.get('http://localhost/api/teople1/courses/'),
+          axios.get('http://localhost/api/teople1/progress/')
+        ]);
+
+        const progressList = progressRes.data.status === 'success' ? progressRes.data.progress : [];
 
         if (courseRes.data.status === 'success') {
-          const mappedCourses = courseRes.data.courses.map(c => {
-            // Find matching progress item by course ID
-            let progressItem = progressList.find(p =>
-              p.course && p.course.some(co => co.id === c.id)
-            )
+          this.courses = courseRes.data.courses.map(c => {
+            const courseProgressItems = progressList.filter(
+              p => p.course && p.course.some(co => co.id === c.id)
+            );
 
-            // Calculate progress percent based on lessons completed
-            let totalLessons = c.Lessons.length || 0
-            let completedLessons = progressItem && progressItem.lesson ? progressItem.lesson.length : 0
-            let progress = totalLessons ? Math.floor((completedLessons / totalLessons) * 100) : 0
+            const totalLessons = c.Lessons ? c.Lessons.length : 0;
+            let completedLessons = 0;
 
-            // Determine status based on progress
-            let status = 'Not Started'
-            if (progress === 100) {
-              status = 'Completed'
-            } else if (progress > 0) {
-              status = 'In Progress'
+            if (totalLessons > 0 && courseProgressItems.length > 0) {
+              const completedLessonIds = new Set();
+              courseProgressItems.forEach(progressItem => {
+                if (progressItem.lesson) {
+                  progressItem.lesson.forEach(lesson => {
+                    if (c.Lessons.some(courseLesson => courseLesson.id === lesson.id)) {
+                      completedLessonIds.add(lesson.id);
+                    }
+                  });
+                }
+              });
+              completedLessons = completedLessonIds.size;
             }
+
+            const progress = totalLessons > 0
+              ? Math.min(100, Math.floor((completedLessons / totalLessons) * 100))
+              : 0;
+
+            let status = 'Not Started';
+            if (progress === 100) status = 'Completed';
+            else if (progress > 0) status = 'In Progress';
+
+            const isCompleted = courseProgressItems.some(item => item.completed);
 
             return {
               id: c.id,
-              title: c.Title || 'Untitled Course',
+              title: c.title || 'Untitled Course',
+              description: c.description || '',
               lessons: totalLessons,
-              instructor: 'N/A', // API does not provide instructor info
+              instructor: c.instructor && c.instructor.length > 0
+                ? c.instructor.join(', ')
+                : 'N/A',
               progress,
-              status,
+              status: isCompleted ? 'Completed' : status,
               image: c.image_url || 'https://via.placeholder.com/340x180?text=No+Image',
-              category: c.category || '',
-            }
-          })
+              category: c.difficulty ? c.difficulty.value : '',
+              hasQuiz: this.quizzes.some(q => q.course && q.course.some(co => co.id === c.id))
+            };
+          });
 
-          this.courses = mappedCourses
-          this.filteredCourses = [...mappedCourses]
+          this.filteredCourses = [...this.courses];
         }
       } catch (err) {
-        console.error('Error fetching courses:', err)
+        console.error('Error fetching courses/progress:', err);
       }
     },
-    openCourseDetails(courseId) {
-      this.$router.push({ name: 'course-detail', params: { id: courseId } })
-    },
-    getButtonText(course) {
-      if (course.progress === 0) return 'Start Now'
-      if (course.progress === 100) return 'View Certificate'
-      return 'Continue'
-    },
-    handleCourseAction(course) {
-      this.selectedCourseId = course.id
-      if (course.progress === 100) {
-        alert(`View certificate for ${course.title}`)
-      } else {
-        this.$router.push({
-          name: 'course-detail',
-          params: { id: course.id }
-        })
+
+async fetchQuizzes() {
+  try {
+    const response = await axios.get('http://localhost/api/teople1/quizzes/');
+
+    if (response.data?.status === 'success') {
+      // Filter only active quizzes with questions
+      this.quizzes = (response.data.quizzes || []).filter(q =>
+        q?.is_active &&
+        Array.isArray(q.Questions) &&
+        q.Questions.length > 0
+      );
+
+      // Update courses with quiz info if we have courses
+      if (Array.isArray(this.courses)) {
+        this.courses = this.courses.map(course => {
+          if (!course?.id) return course;
+
+          const hasQuiz = this.quizzes.some(q =>
+            Array.isArray(q.course) &&
+            q.course.some(co => co?.id === course.id)
+          );
+
+          return {
+            ...course,
+            hasQuiz
+          };
+        });
+
+        // Update filtered courses while preserving any existing filters
+        this.filteredCourses = this.applyFilters([...this.courses]);
       }
-    },
+    } else {
+      console.warn('Unexpected quiz response format:', response.data);
+    }
+  } catch (error) {
+    console.error('Error fetching quizzes:', error);
+    this.$notify({
+      type: 'error',
+      title: 'Quiz Error',
+      text: 'Failed to load quiz information. Please try again later.'
+    });
+  }
+},
+
+
+openCourseDetails(courseId) {
+  if (!courseId) {
+    console.error('Cannot open course details - missing course ID');
+    return;
+  }
+  this.$router.push({
+    name: 'course-detail',
+    params: { id: courseId }
+  }).catch(err => {
+    if (err.name !== 'NavigationDuplicated') {
+      console.error('Navigation error:', err);
+    }
+  });
+},
+
+getButtonText(course) {
+  if (!course) return 'Start Now';
+
+  if (course.progress === 0) return 'Start Now';
+  if (course.progress === 100) {
+    return course.hasQuiz ? 'Take Quiz' : 'View Certificate';
+  }
+  return 'Continue';
+},
+
+handleCourseAction(course) {
+  if (!course?.id) {
+    console.error('Invalid course data - missing ID');
+    return;
+  }
+
+  this.selectedCourseId = course.id;
+
+  if (course.progress === 100) {
+    if (course.hasQuiz) {
+      this.navigateToQuiz(course.id);
+    } else {
+      this.showCertificateAlert(course.title);
+    }
+  } else {
+    this.openCourseDetails(course.id);
+  }
+},
+
+// Helper methods
+navigateToQuiz(courseId) {
+  this.$router.push({
+    name: 'course-quiz',
+    params: { id: courseId }
+  }).catch(err => {
+    if (err.name !== 'NavigationDuplicated') {
+      console.error('Quiz navigation error:', err);
+      this.$notify({
+        type: 'error',
+        title: 'Navigation Error',
+        text: 'Could not open quiz. Please try again.'
+      });
+    }
+  });
+},
+
+showCertificateAlert(courseTitle) {
+  this.$notify({
+    type: 'info',
+    title: 'Certificate Available',
+    text: `View certificate for ${courseTitle || 'this course'}`
+  });
+},
+
+applyFilters(courses) {
+  // Apply current search and filter status to the course list
+  let filtered = courses || [];
+
+  if (this.searchQuery.trim() !== '') {
+    const q = this.searchQuery.toLowerCase();
+    filtered = filtered.filter(c =>
+      (c.title?.toLowerCase().includes(q) || '') ||
+      (c.category?.toLowerCase().includes(q) || '') ||
+      (c.instructor?.toLowerCase().includes(q) || '')
+    );
+  }
+
+  if (this.filterStatus !== 'all') {
+    const statusMap = {
+      'in-progress': 'In Progress',
+      'completed': 'Completed',
+      'not-started': 'Not Started'
+    };
+    filtered = filtered.filter(c => c.status === statusMap[this.filterStatus]);
+  }
+
+  return filtered;
+},
+
     startCourse(courseId) {
       this.$router.push({
         name: 'course-learn',
         params: { id: courseId }
       })
     },
+
     statusClass(status) {
       switch (status.toLowerCase()) {
         case 'completed':
@@ -184,20 +321,21 @@ export default {
           return 'not-started'
       }
     },
+
     filterCourses() {
       let filtered = this.courses
 
       if (this.searchQuery.trim() !== '') {
         const q = this.searchQuery.toLowerCase()
-        filtered = filtered.filter(c =>
-          c.title.toLowerCase().includes(q) ||
-          c.category.toLowerCase().includes(q) ||
-          c.instructor.toLowerCase().includes(q)
+        filtered = filtered.filter(
+          c =>
+            c.title.toLowerCase().includes(q) ||
+            c.category.toLowerCase().includes(q) ||
+            c.instructor.toLowerCase().includes(q)
         )
       }
 
       if (this.filterStatus !== 'all') {
-        // Map filter value to status string
         const statusMap = {
           'in-progress': 'In Progress',
           'completed': 'Completed',
@@ -212,6 +350,8 @@ export default {
 };
 </script>
 
+
+
 <style scoped>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
@@ -223,7 +363,32 @@ export default {
   font-family: 'Poppins', sans-serif;
   background: #f9fafb;
 }
+.quiz-badge, .quiz-indicator {
+  margin-left: 5px;
+  color: #17a2b8;
+}
 
+.course-status.complete {
+  position: relative;
+  padding-right: 25px;
+}
+
+.quiz-badge {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.quiz-indicator {
+  margin-left: 8px;
+}
+
+.course-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .header-section {
   display: flex;
   justify-content: space-between;
