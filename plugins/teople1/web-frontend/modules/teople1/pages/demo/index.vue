@@ -1,4 +1,5 @@
 <template>
+
   <div class="dashboard">
     <!-- Page Header -->
     <h2 class="text-2xl font-bold mb-6">Welcome, Admin 👋</h2>
